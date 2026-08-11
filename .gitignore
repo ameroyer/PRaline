@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.git_reviewer/
+.praline/
+
+# Credentials — never commit. The Slack bot token and the github->slack user
+# mapping belong in ~/.config/praline/slack.json, outside any repo; these
+# patterns are a second line of defence if a copy ever lands here.
+slack.json
+*.token
+.env
+.env.*

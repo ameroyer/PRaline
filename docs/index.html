@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PRaline Developer Guide</title>
+<style>
+  /* Same pastel rice theme as the knowledge-base pages memory.py generates,
+     so everything PRaline-related looks like one family. */
+  :root {
+    --bg: #fdf7fb;
+    --surface: #ffffff;
+    --surface2: #f7eef8;
+    --ink: #382c44;
+    --muted: #8c7a9a;
+    --line: #ecdcf0;
+    --pink: #c2488c;
+    --purple: #7c56c9;
+    --mint: #1f9d78;
+    --peach: #c9791c;
+    --shadow: rgba(150, 110, 160, 0.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1726; --surface: #241e33; --surface2: #2c2440;
+      --ink: #f3e9f7; --muted: #a996c4; --line: #4a3d63;
+      --pink: #f6a9cf; --purple: #c9a4f5; --mint: #92e8c9; --peach: #ffcf96;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fdf7fb; --surface: #ffffff; --surface2: #f7eef8;
+    --ink: #382c44; --muted: #8c7a9a; --line: #ecdcf0;
+    --pink: #c2488c; --purple: #7c56c9; --mint: #1f9d78; --peach: #c9791c;
+    --shadow: rgba(150, 110, 160, 0.14);
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c1726; --surface: #241e33; --surface2: #2c2440;
+    --ink: #f3e9f7; --muted: #a996c4; --line: #4a3d63;
+    --pink: #f6a9cf; --purple: #c9a4f5; --mint: #92e8c9; --peach: #ffcf96;
+    --shadow: rgba(0, 0, 0, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+  }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.7; font-size: 16px; -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--pink) 7%, transparent), transparent 40%),
+      radial-gradient(circle at 90% 4%, color-mix(in srgb, var(--purple) 8%, transparent), transparent 40%);
+    background-attachment: fixed;
+  }
+  .shell { max-width: 1080px; margin: 0 auto; padding: 2.5rem 1.5rem 5rem; }
+  header.masthead {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.1rem 1.4rem; margin-bottom: 1.8rem; box-shadow: 0 6px 20px var(--shadow);
+  }
+  header.masthead .termbar { display: flex; gap: 0.4rem; margin-bottom: 0.8rem; }
+  header.masthead .termbar span { width: 0.55rem; height: 0.55rem; border-radius: 50%; }
+  header.masthead .termbar span:nth-child(1) { background: var(--pink); }
+  header.masthead .termbar span:nth-child(2) { background: var(--peach); }
+  header.masthead .termbar span:nth-child(3) { background: var(--mint); }
+  header.masthead .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem; letter-spacing: 0.02em; color: var(--muted);
+  }
+  header.masthead .eyebrow .prompt { color: var(--mint); }
+  header.masthead h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.35rem; margin: 0.3rem 0 0; text-wrap: balance; font-weight: 700;
+    background: linear-gradient(90deg, var(--pink), var(--purple));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  header.masthead p.tagline { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.9rem; }
+
+  .layout { display: flex; gap: 2.2rem; align-items: flex-start; }
+  nav.toc {
+    flex: none; width: 232px; position: sticky; top: 2rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1rem 1.1rem; box-shadow: 0 4px 14px var(--shadow);
+    max-height: calc(100vh - 4rem); overflow-y: auto;
+  }
+  nav.toc .toc-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 0.6rem; display: block;
+  }
+  nav.toc ul { list-style: none; padding-left: 0; margin: 0; }
+  nav.toc li + li { margin-top: 0.45rem; }
+  nav.toc a {
+    color: var(--ink); text-decoration: none; font-size: 0.86rem; display: block;
+    border-left: 2px solid transparent; padding-left: 0.6rem;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--pink); border-left-color: var(--pink); }
+  a:focus-visible { outline: 2px solid var(--purple); outline-offset: 2px; border-radius: 3px; }
+
+  main { flex: 1; min-width: 0; overflow-wrap: break-word; }
+  main > article {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 0.4rem 2rem 2.2rem; box-shadow: 0 4px 14px var(--shadow);
+  }
+  h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.15rem; margin: 2.4rem 0 0.7rem; padding-top: 1.4rem;
+    border-top: 1px dashed var(--line);
+    display: flex; align-items: center; gap: 0.55rem; color: var(--pink);
+    text-wrap: balance; scroll-margin-top: 1.5rem;
+  }
+  h2:first-of-type { margin-top: 1.4rem; border-top: none; padding-top: 0; }
+  h2::before { content: "//"; color: var(--muted); font-weight: 400; }
+  h2:nth-of-type(3n+2) { color: var(--purple); }
+  h2:nth-of-type(3n) { color: var(--mint); }
+  h3 {
+    font-size: 1rem; color: var(--purple); margin: 1.6rem 0 0.6rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    scroll-margin-top: 1.5rem;
+  }
+  p { margin: 0.7rem 0; max-width: 42rem; }
+  p, li { font-size: 0.97rem; }
+  ul, ol { padding-left: 1.3rem; margin: 0.7rem 0; }
+  li + li { margin-top: 0.4rem; }
+  li::marker { color: var(--mint); }
+  a { color: var(--pink); text-decoration-color: color-mix(in srgb, var(--pink) 45%, transparent); }
+  strong { color: var(--pink); font-weight: 700; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--surface2); color: var(--peach);
+    padding: 0.15rem 0.4rem; border-radius: 5px; font-size: 0.85em;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--surface2); border: 1px solid var(--line); border-radius: 10px;
+    overflow-x: auto; margin: 1rem 0;
+  }
+  pre code { display: block; padding: 1rem 1.1rem; background: none; border: none; color: var(--ink); }
+  blockquote {
+    margin: 1.1rem 0; padding: 0.8rem 1.1rem; border-radius: 8px;
+    border-left: 3px solid var(--peach);
+    background: color-mix(in srgb, var(--peach) 10%, var(--surface));
+  }
+  blockquote p { margin: 0; color: var(--ink); max-width: none; }
+  blockquote::before { content: "⚠ "; color: var(--peach); }
+  .tablewrap { overflow-x: auto; margin: 1rem 0; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--purple); font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  td:first-child code { white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  .num { font-variant-numeric: tabular-nums; }
+  footer {
+    margin-top: 2rem; padding-top: 1rem;
+    font-size: 0.78rem; color: var(--muted); text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  footer .prompt { color: var(--mint); }
+
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    nav.toc { position: static; width: 100%; max-height: none; }
+    nav.toc ul { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    nav.toc li + li { margin-top: 0; }
+    nav.toc a { border: 1px solid var(--line); border-radius: 999px; padding: 0.3rem 0.8rem; }
+    main > article { padding: 0.4rem 1.2rem 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="masthead">
+    <div class="termbar"><span></span><span></span><span></span></div>
+    <div class="eyebrow"><span class="prompt">$</span> cat developer_guide.md</div>
+    <h1>🍫 PRaline Developer Guide</h1>
+    <p class="tagline">Everything you need to start hacking on the code review chocolate.</p>
+  </header>
+
+  <div class="layout">
+    <nav class="toc">
+      <span class="toc-label">Contents</span>
+      <ul>
+        <li><a href="#overview">What PRaline is</a></li>
+        <li><a href="#setup">Dev setup</a></li>
+        <li><a href="#layout-code">Code layout</a></li>
+        <li><a href="#review-flow">How a review runs</a></li>
+        <li><a href="#auto-mode">Auto mode</a></li>
+        <li><a href="#watching">What's new, and PR order</a></li>
+        <li><a href="#slack">Slack notifications</a></li>
+        <li><a href="#review-log">The review log</a></li>
+        <li><a href="#huge-prs">Huge PRs</a></li>
+        <li><a href="#knowledge">The knowledge base</a></li>
+        <li><a href="#claude">The Claude backend</a></li>
+        <li><a href="#security">Secrets and data flow</a></li>
+        <li><a href="#invariants">Invariants</a></li>
+        <li><a href="#recipes">Where changes go</a></li>
+        <li><a href="#gotchas">Gotchas</a></li>
+      </ul>
+    </nav>
+
+    <main>
+      <article>
+
+      <h2 id="overview">What PRaline is</h2>
+      <p>
+        PRaline is an interactive terminal tool that reviews GitHub pull requests.
+        It fetches a PR's diff and comment thread, asks Claude for a review, then walks
+        you through each proposed comment so you can accept, reject or edit it before
+        anything is posted under your account.
+      </p>
+      <p>Three decisions shape the whole codebase. Keep them in mind before touching anything:</p>
+      <ul>
+        <li><strong>Claude Code is the LLM backend.</strong> Reviews run through the <code>claude</code> CLI on the user's existing subscription. There is no Anthropic API key and no billed API call anywhere.</li>
+        <li><strong>PRaline never writes code.</strong> The GitHub layer can read content and post comments or issues. It has no code path that pushes, merges, approves or creates branches.</li>
+        <li><strong>A human approves every comment</strong>, outside <code>praline auto</code>. Nothing else reaches GitHub without going through the interactive approval loop first.</li>
+      </ul>
+      <p>The whole tool is about 3,000 lines of Python across twelve small modules, with two runtime dependencies: <code>requests</code> and <code>markdown</code>.</p>
+
+      <h2 id="setup">Dev setup</h2>
+      <p>You need Python 3.12+, <a href="https://docs.astral.sh/uv/">uv</a>, the <code>claude</code> CLI logged in, and a GitHub token in <code>GITHUB_TOKEN</code> or <code>GH_TOKEN</code> (Contents: read, Pull requests: read/write, Issues: read/write; a classic token with <code>repo</code> scope also works).</p>
+<pre><code>git clone git@github.com:ameroyer/PRaline.git
+cd PRaline
+uv sync
+
+# run your working copy against any repo you have PRs in
+uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
+      <p>
+        Lint with <code>uvx ruff check .</code> (config in <code>pyproject.toml</code>: line length 100,
+        rules <code>E</code>, <code>F</code>, <code>I</code>; <code>prompts.py</code> is exempt from
+        <code>E501</code> because it is prose, not code). There is no test suite yet, so testing is manual:
+        point <code>--dir</code> at a scratch repo with an open PR and exercise the menu.
+        A first test suite would be a very welcome contribution; <code>github.py</code> and
+        <code>reviewer.py</code> are the natural starting points since both are easy to mock.
+      </p>
+      <blockquote><p>Reviews post real comments under your GitHub account. Use a scratch repo while developing, and answer "n" at the posting confirmation if you only want to inspect the output.</p></blockquote>
+
+      <h2 id="layout-code">Code layout</h2>
+      <p>Each module has one job. The import graph is a shallow tree with <code>cli.py</code> at the root and <code>verdict.py</code> / <code>term.py</code> as dependency-free leaves; nothing imports <code>cli</code>.</p>
+      <div class="tablewrap">
+      <table>
+        <tr><th>Module</th><th class="num">Lines</th><th>Job</th></tr>
+        <tr><td><code>cli.py</code></td><td class="num">~430</td><td>Entry point (<code>praline = praline.cli:main</code>). Argument parsing and the main menu. All <code>input()</code> prompts live here or in <code>reviewer.py</code>.</td></tr>
+        <tr><td><code>github.py</code></td><td class="num">~480</td><td>Every GitHub call, REST and GraphQL, via <code>requests</code> (no <code>gh</code> CLI dependency), plus local git helpers and the per-run comment cache. This is the safety boundary; see <a href="#invariants">Invariants</a>.</td></tr>
+        <tr><td><code>reviewer.py</code></td><td class="num">~470</td><td>Assembles the review request, parses Claude's JSON reply, flattens it into postable items, runs the approval loop, posts accepted comments, writes the review log and re-requests your review.</td></tr>
+        <tr><td><code>prompts.py</code></td><td class="num">~280</td><td>The four system prompts (PR review, codebase scan, repo knowledge, PR history) plus <code>KB_STYLE</code>, the writing rules shared by the three knowledge-base prompts. The review output schema is defined here, in prose.</td></tr>
+        <tr><td><code>memory.py</code></td><td class="num">~210</td><td>Builds and updates the knowledge base under <code>.praline/</code>, renders it to markdown and HTML.</td></tr>
+        <tr><td><code>auto.py</code></td><td class="num">~175</td><td>Non-interactive mode (<code>praline auto</code>): picks PRs, reviews them, posts every comment, no prompts. See <a href="#auto-mode">Auto mode</a>.</td></tr>
+        <tr><td><code>slack.py</code></td><td class="num">~330</td><td>Optional Slack notifications: config loading, user resolution, the author/reviewer group chat, and the reviewer round-up. Depends only on <code>verdict</code> and <code>term</code>.</td></tr>
+        <tr><td><code>verdict.py</code></td><td class="num">~90</td><td>What a finished review is, as pure functions over dicts: the <code>ready</code>/<code>minor</code>/<code>wip</code> vocabulary, <code>flatten_review</code>, <code>overview_of</code>, <code>count_items</code>, <code>reviewed_entry</code>. Imports nothing, so any module can read a review without pulling in another.</td></tr>
+        <tr><td><code>watch.py</code></td><td class="num">~200</td><td>What changed since the last look (<code>seen_state.json</code>, the 🆕/🔄 icons) and <code>order_prs</code>, the stack-aware review order shared by the CLI and auto mode.</td></tr>
+        <tr><td><code>claude_client.py</code></td><td class="num">~155</td><td>One function, <code>ask()</code>. Runs a single headless <code>claude</code> turn and returns its text. Owns the tool allow/deny lists and strips credentials from the child environment.</td></tr>
+        <tr><td><code>config.py</code></td><td class="num">~175</td><td>Paths and load/save helpers for the <code>.praline/</code> files, plus <code>Run</code>, the dataclass holding one invocation's settings. No logic beyond file IO.</td></tr>
+        <tr><td><code>term.py</code></td><td class="num">~30</td><td>ANSI colors, <code>_c</code> / <code>_rule</code>, and <code>confirm()</code>, the shared yes/no prompt. Used by every module that prints.</td></tr>
+        <tr><td><code>templates/<wbr>knowledge.html</code></td><td class="num">~200</td><td>Not code: the standalone HTML shell for the knowledge base, filled in by <code>memory.render_knowledge_html</code>.</td></tr>
+      </table>
+      </div>
+
+      <p>
+        Two small conventions keep the plumbing out of the way. Settings for one invocation
+        (<code>repo_dir</code>, <code>repo</code>, <code>model</code>, <code>reviewer_login</code>,
+        <code>request_review</code>, <code>slack</code>) travel as a single
+        <code>config.Run</code>, built once in <code>cli.main</code> and handed to
+        <code>_main_menu</code>, <code>_do_review</code> and <code>run_auto</code> — a new setting
+        means one field, not five signatures. And a finished review is described in exactly one
+        place, <code>verdict.reviewed_entry</code>, so the CLI summary and the Slack round-up cannot
+        drift apart.
+      </p>
+
+      <h2 id="review-flow">How a review runs</h2>
+      <p>Menu option 1 ends up in <code>cli._do_review</code>, which drives this sequence:</p>
+      <ol>
+        <li><code>github.list_open_prs</code> lists open PRs; the user picks one and sees a small status line (diff size, who has commented).</li>
+        <li><code>reviewer.review_pr</code> fetches the raw diff and the full existing conversation (top-level comments plus line-level threads, tagged with comment ids), builds the system prompt from <code>prompts.DEFAULT_REVIEW_PROMPT</code> (or a custom prompt file) plus the knowledge base, and makes one <code>claude_client.ask</code> call.</li>
+        <li>Claude must answer with a single JSON object: a <code>summary</code>, <code>replies</code> to existing threads (with <code>reply_to_id</code> and an optional <code>resolved</code> flag), new <code>comments</code> (severity <code>bug</code> / <code>warning</code> / <code>nit</code>) and <code>bugs</code>. <code>review_pr</code> strips markdown fences defensively and <code>json.loads</code> the rest.</li>
+        <li><code>reviewer.flatten_review</code> turns that object into one ordered list of postable items (summary, replies, bugs, comments). Both the approval loop and auto mode consume that shape, so ordering changes hit both.</li>
+        <li><code>reviewer.run_approval_loop</code> prints an overview of everything, then goes item by item: accept, reject or edit. The summary is the first item and, if accepted, becomes the top-level PR comment.</li>
+        <li>After a final confirmation, <code>reviewer.post_accepted_comments</code> posts each item: replies go into their original thread (and can mark it resolved), items with a file and line become line comments (pinned to the head sha the review was written against), the rest become general comments.</li>
+        <li>Then three tail steps, in this order and all non-fatal: <code>reviewer.log_review</code> records the review in <code>.praline/review_log.json</code>, <code>reviewer.rerequest_review</code> puts you back on the PR's reviewer list, and <code>slack.notify_review</code> posts to Slack if <code>--slack</code> is on. Logging comes first on purpose: the memory must survive a Slack or GitHub hiccup in the other two.</li>
+      </ol>
+      <p>
+        Every reply carries a verdict alongside the summary: <code>status</code> is one of
+        <code>ready</code> / <code>minor</code> / <code>wip</code>, normalized by
+        <code>verdict.status_key</code> (which also accepts a full phrase like "needs minor
+        revisions") and rendered by <code>verdict.status_label</code>. It is shown at the top of the
+        approval overview, in the auto-mode summary and in Slack. An unusable value renders as
+        "❔ No status given" rather than being guessed at.
+      </p>
+      <p>
+        On a PR that already has a conversation, the prompt makes replying the primary job:
+        the model must consider every existing thread before raising anything new, and an
+        empty list of new comments is treated as a good outcome, not a failure.
+      </p>
+
+      <h2 id="auto-mode">Auto mode</h2>
+      <p>
+        <code>praline auto [PR ...]</code> runs the same review as the interactive menu, minus
+        every prompt: <code>auto.run_auto</code> picks PRs, reviews each with
+        <code>reviewer.review_pr</code>, and posts every proposed item straight through
+        <code>reviewer.post_accepted_comments</code>. There is no approval loop.
+      </p>
+      <ol>
+        <li><code>auto.select_prs</code> lists open PRs and keeps a PR if it was passed explicitly
+        as an argument, or if it is not a draft and has activity — its own <code>updated_at</code>,
+        or a comment created or edited — more recent than the last time this user auto-reviewed
+        it. Explicit PR numbers skip both the draft and activity checks. The result is returned in
+        <code>watch.order_prs</code> order (see <a href="#watching">below</a>), so stacks are
+        reviewed bottom-up.</li>
+        <li><code>auto._has_new_activity</code> checks the PR's own <code>updated_at</code> first and
+        only pays for the two comment endpoints when that says no — the fetch exists solely to catch
+        a comment edited in place without the PR being bumped.</li>
+        <li>Per-user "last reviewed" timestamps live in <code>.praline/auto_state.json</code>
+        (<code>config.load_auto_state</code> / <code>save_auto_state</code>), keyed by PR number,
+        and are only updated after a PR is actually processed.</li>
+        <li>Before reviewing anything, it refetches full stats per candidate (the list endpoint
+        omits <code>changed_files</code>, same gotcha as <code>get_pr_status</code>) and sums them.
+        Past <code>--max-changed-files</code> it asks a single yes/no confirmation; this is the
+        only prompt auto mode ever shows.</li>
+        <li>Each review is flattened by <code>reviewer.flatten_review</code>, the same call
+        <code>run_approval_loop</code> makes, and every item is posted unconditionally.</li>
+        <li>Each PR gets the same tail steps as an interactive review: log, re-request (unless <code>--no-request-review</code>), notify.</li>
+        <li>A per-PR result (files changed, verdict, comments added, replies left, threads resolved,
+        or the error if the review call failed) is collected and printed as a summary table at the
+        end, and — with <code>--slack</code> — DMed to you as a round-up grouped by verdict.</li>
+      </ol>
+      <p>
+        This is the one intentional exception to the "no auto-posting" invariant below: a human
+        still approves every comment in the interactive menu, but auto mode exists precisely to
+        skip that step for PRs the user has pointed it at.
+      </p>
+
+      <h2 id="watching">What's new, and PR order</h2>
+      <p>
+        <code>watch.py</code> answers two questions that have nothing to do with the model.
+      </p>
+      <ul>
+        <li><strong>What moved since last time.</strong> <code>classify</code> tags each open PR
+        <code>NEW</code> (absent from <code>.praline/seen_state.json</code>), <code>UPDATED</code>
+        (its <code>updated_at</code> moved) or <code>SEEN</code>, and <code>run_check</code> prints
+        the digest behind <code>praline check</code> (<code>--no-mark</code> to report without
+        acknowledging) and menu entry 4. Only those two write state
+        (<code>mark_seen</code>); the interactive PR list reads it and never acknowledges, so the
+        icons stay put until you say so. First run has nothing to compare against, so everything is
+        <code>NEW</code> exactly once — <code>is_first_look</code> keys off
+        <code>last_checked</code>, not the PR map, because a repo with no open PRs stores an empty one.</li>
+        <li><strong>What order to review in.</strong> <code>order_prs</code> sorts by PR number
+        ascending, except that a PR whose base branch is another open PR's head branch is a stack
+        and comes after its parent. Stacks are walked depth first so they stay contiguous. A cycle
+        or a parent that isn't open falls back to number order; nothing is ever dropped.
+        <code>stack_parents</code> builds the whole parent map in one pass and feeds the
+        <code>↳ on #5</code> markers in the list.</li>
+      </ul>
+      <p>
+        Both the CLI picker and <code>auto.select_prs</code> go through this module, so ordering and
+        icons cannot drift apart between the two modes.
+      </p>
+
+      <h2 id="slack">Slack notifications</h2>
+      <p>
+        Entirely optional and off unless <code>--slack</code> is passed. <code>cli._load_slack</code>
+        resolves the config once at start-up and exits if it is broken; after that every Slack failure
+        is printed and swallowed, because the review it would report on is already posted.
+      </p>
+      <ul>
+        <li><strong>Config.</strong> <code>slack.load_config</code> searches
+        <code>$PRALINE_SLACK_CONFIG</code>, then <code>~/.config/praline/slack.json</code>, then
+        <code>&lt;repo&gt;/.praline/slack.json</code>. The token may come from
+        <code>$SLACK_BOT_TOKEN</code> / <code>$PRALINE_SLACK_BOT_TOKEN</code> instead, so it need not
+        touch a file at all. Nothing here ever writes a token.</li>
+        <li><strong>Who gets the message.</strong> <code>notify_review</code> posts to the PR author
+        and the reviewer (<code>cfg.reviewer_login</code>, the GitHub login PRaline authenticated as).
+        Two recipients means <code>conversations.open</code> and a group DM — the reason
+        <code>mpim:write</code> is required; one means a direct <code>chat.postMessage</code> to the
+        member ID, which needs no extra scope. Unmapped people are skipped, not fatal.</li>
+        <li><strong>Resolution is cached.</strong> A mapping value may be a member ID, an
+        <code>@handle</code> or an email; handle lookups page through <code>users.list</code>, so
+        results are memoized on the config object for the run.</li>
+        <li><strong>The round-up.</strong> <code>notify_digest</code> DMs the reviewer a list of
+        everything just reviewed, grouped by verdict, ready-to-approve first. Sent at the end of
+        <code>run_auto</code>, and on quitting an interactive session in which anything was
+        reviewed. <code>notify_digest</code> itself returns early on an empty list, so callers do
+        not need to guard the count.</li>
+      </ul>
+
+      <h2 id="review-log">The review log</h2>
+      <p>
+        <code>.praline/review_log.json</code> is PRaline's memory of its own work: one entry per
+        posted review with the PR number, title, author, head sha, branches, verdict, the overview
+        text and the comment counts, capped at the last 200 by
+        <code>config.append_review_log</code>.
+      </p>
+      <p>
+        <code>reviewer._format_review_log</code> feeds the newest entries back into later review
+        prompts, always including earlier passes over <em>the same</em> PR and labelling them. That
+        is what makes a re-review build on the last one instead of repeating it, and what lets a
+        stacked PR be read in light of the PR below it, which was reviewed minutes earlier. It is
+        distinct from the knowledge base (lessons from merged PRs) and from
+        <code>seen_state.json</code> (what is new since you last looked).
+      </p>
+
+      <h2 id="huge-prs">Huge PRs</h2>
+      <p>
+        GitHub's API refuses to render a PR past roughly 300 changed files as a single diff:
+        <code>get_pr_diff</code> gets a <code>406 Not Acceptable</code> and raises
+        <code>DiffTooLargeError</code>. <code>reviewer.review_pr</code> catches it and hands off to
+        <code>_review_huge_pr</code>, which warns the user ("huge PR, careful") and recovers in two
+        stages:
+      </p>
+      <ol>
+        <li><strong>Local diff.</strong> <code>github.fetch_pr_refs</code> fetches the base branch
+        and the PR's hidden head ref (<code>pull/N/head</code>), then
+        <code>get_pr_diff_local</code> produces the same unified diff with
+        <code>git diff origin/&lt;base&gt;...&lt;head_sha&gt;</code>, no size limit. The PR's true
+        size (from <code>git diff --stat</code>, since <code>PRInfo</code> counts are 0 off the
+        list endpoint) is printed before going further.</li>
+        <li><strong>Explore mode.</strong> Interactively, the user is asked; in auto mode it is
+        enabled directly, since auto mode has no prompts. <code>github.add_pr_worktree</code>
+        checks the PR head out detached in a temporary worktree, the diff is written to
+        <code>PRALINE_DIFF.patch</code> at its root, and the review call runs with
+        <code>READ_ONLY_TOOLS</code>, <code>SECRET_DENY_RULES</code>, <code>cwd</code> set to the
+        worktree and the scan's longer timeout. <code>prompts.HUGE_PR_EXPLORE_ADDENDUM</code>
+        tells the model to page through the diff in slices and use the checkout for context. The
+        worktree is force-removed in a <code>finally</code>. Declining explore mode inlines the
+        full local diff instead, which works whenever it fits the model's context.</li>
+      </ol>
+      <p>
+        Either way the response contract is untouched: the same JSON schema comes back, and the
+        approval loop or auto-posting proceeds as for any other PR. The feature holds the four
+        holy principles (all six of them): <strong>MINIMALISM</strong>, nothing changes before a
+        406 and the tooling is the scan's, reused; <strong>CLEANLINESS</strong>, one prompt, one
+        schema, only the diff's transport changes; <strong>MODULARITY</strong>, git plumbing in
+        <code>github.py</code>, flow in <code>reviewer.py</code>, instructions in
+        <code>prompts.py</code>; <strong>EFFICIENCY</strong>, the diff stat steers the model's
+        reading budget toward the files that matter; <strong>SAFETY</strong>, the worktree is
+        temporary and detached, so the user's checkout, index and branches are never touched;
+        <strong>SECURITY</strong>, explore mode runs read-only with the credential denylist,
+        no shell and no network, exactly like the codebase scan.
+      </p>
+
+      <h2 id="knowledge">The knowledge base</h2>
+      <p>
+        Menu option 2 calls <code>memory.update_knowledge</code>, which returns the
+        <code>(markdown, html)</code> paths so the CLI can print them. It writes into
+        <code>.praline/</code> inside the reviewed repo, not inside PRaline:
+      </p>
+      <div class="tablewrap">
+      <table>
+        <tr><th>File</th><th>Written by</th><th>Contents</th></tr>
+        <tr><td><code>repo.md</code></td><td><code>scan_codebase</code> or <code>build_repo_knowledge</code></td><td>Architecture, module reference, conventions, invariants, pain points.</td></tr>
+        <tr><td><code>pr_history.md</code></td><td><code>build_pr_history</code></td><td>Lessons from merged PRs in the chosen window, every claim cited as <code>(#123)</code> and linkified to the PR page.</td></tr>
+        <tr><td><code>knowledge.md</code></td><td><code>render_knowledge_md</code></td><td>The two halves stitched together under one title, for reading and grepping.</td></tr>
+        <tr><td><code>knowledge.html</code></td><td><code>render_knowledge_html</code></td><td>The same document through <code>templates/knowledge.html</code>, standalone and publishable.</td></tr>
+        <tr><td><code>knowledge_state.json</code></td><td><code>update_knowledge</code></td><td>Build timestamp, used to detect newly merged PRs.</td></tr>
+        <tr><td><code>artifact_url.txt</code></td><td>you, optionally</td><td>Pointer to a published copy of the HTML.</td></tr>
+      </table>
+      </div>
+      <p>
+        <code>repo.md</code> is built two different ways, and which one runs is decided by whether
+        it already has content:
+      </p>
+      <ul>
+        <li><strong>First build: <code>scan_codebase</code>.</strong> A tool-enabled Claude turn
+        runs with <code>cwd</code> set to the repo and reads it directly
+        (<code>claude_client.READ_ONLY_TOOLS</code>: <code>Read</code>, <code>Glob</code>,
+        <code>Grep</code>). It follows entry points and imports rather than guessing from a file
+        list, so this is the pass that produces the module reference and the invariants. Slow, and
+        it runs once. Timeout is <code>EXPLORE_TIMEOUT_S</code>, not the default.</li>
+        <li><strong>Every later build: <code>build_repo_knowledge</code>.</strong> No tools. It
+        looks up the default branch via the GitHub API, runs
+        <code>github.fetch_remote_branch</code> (<code>git fetch origin &lt;branch&gt;</code>,
+        quiet), and reads <code>git ls-tree</code> / <code>git log</code> off the resulting
+        <code>origin/&lt;branch&gt;</code> ref instead of <code>HEAD</code>, so a stale local
+        checkout cannot skew it. <code>git fetch</code> only updates
+        <code>refs/remotes/*</code>, never the working tree, the index, or local branches. If your
+        checkout was behind, a one-line note reports by how many commits.</li>
+      </ul>
+      <p>
+        Both markdown halves are fed into the review prompt on every review, which is the whole
+        point: reviews get repo-specific over time.
+      </p>
+      <p>
+        Updates are edit passes, not rewrites. The previous document is included in the
+        prompt with instructions to merge, and <code>_guard_against_erasure</code> refuses any
+        result shorter than half the previous version, keeping the old file instead.
+        A <code>.bak</code> copy is written before each save. If you touch this flow, preserve
+        both protections; silently losing accumulated knowledge is the worst failure
+        mode this module has.
+      </p>
+      <p>
+        Staleness is checked on the way into a review. <code>memory.last_updated_at</code> reads
+        the build timestamp (falling back to <code>repo.md</code>'s mtime for knowledge bases
+        built before that file existed), <code>merged_since_last_update</code> asks GitHub what
+        has merged since, and <code>cli._offer_update_for_new_prs</code> lists those PRs and
+        offers to refresh. A failure here prints a warning and gets out of the way; it must never
+        block the review the user actually asked for.
+      </p>
+
+      <h2 id="claude">The Claude backend</h2>
+      <p><code>claude_client.ask()</code> is the only place PRaline talks to a model. It runs:</p>
+<pre><code>claude -p --output-format json --model &lt;model&gt; \
+       --allowedTools &lt;tools&gt; --disallowedTools &lt;deny&gt; \
+       --system-prompt &lt;prompt&gt;</code></pre>
+      <p>Details worth knowing before you modify it:</p>
+      <ul>
+        <li>The user message (typically a large diff) is piped via <strong>stdin</strong>, not argv. Large diffs exceed the OS argument size limit (<code>E2BIG</code>) otherwise.</li>
+        <li>There are exactly two call shapes. Reviews and update passes use the defaults, <code>tools=""</code> and no <code>cwd</code>: no tools at all, so Claude only reasons over the text it is handed. The codebase scan and huge-PR explore mode pass <code>READ_ONLY_TOOLS</code>, <code>SECRET_DENY_RULES</code> and a <code>cwd</code>. Nothing else should need tools; if you think it does, see <a href="#security">Secrets and data flow</a> first.</li>
+        <li>Every failure mode (timeout, non-zero exit, empty stdout, bad JSON, error payload, empty result) raises a <code>RuntimeError</code> carrying truncated stderr/stdout. Keep that style: errors here surface directly in the CLI and are the user's only debugging signal.</li>
+        <li>The default timeout is 600 seconds; big diffs on big models are slow. The scan gets 2,400.</li>
+        <li>The subprocess runs with <code>env=_clean_env()</code>: the current environment minus
+        <code>GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, <code>SLACK_BOT_TOKEN</code> and
+        <code>PRALINE_SLACK_BOT_TOKEN</code>. The turn has no use for them, and a process that never
+        receives a secret cannot leak it — through a tool, a hook, an MCP server, or a diff written
+        to talk the model into echoing its environment. Add any new credential variable to that
+        tuple the moment you introduce it.</li>
+      </ul>
+
+      <h2 id="security">Secrets and data flow</h2>
+      <p>
+        The knowledge base is the one place where reading and publishing meet. Whatever lands in
+        <code>repo.md</code> is fed back into every later review prompt, can be posted to GitHub as
+        part of a comment, and may be published as an artifact. So the scan is constrained on two
+        levels, and both matter:
+      </p>
+      <ul>
+        <li><strong>The CLI blocks credential files.</strong> <code>SECRET_DENY_RULES</code> in
+        <code>claude_client.py</code> is a list of <code>Read(&lt;glob&gt;)</code> deny rules
+        (<code>.env*</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>,
+        <code>.netrc</code>, <code>secrets.*</code>, <code>credentials.*</code> and more). They match
+        credential <em>files</em> on purpose: a blanket <code>*token*</code> would hide
+        <code>tokenizer.py</code>, and a scan that quietly skips real code is its own failure. Deny rules
+        override the allowlist and apply to <code>Grep</code> as well as <code>Read</code>, so a
+        blocked file cannot be laundered through a content search. This is enforced by the harness,
+        not by the model's judgement.</li>
+        <li><strong>The prompt handles what globs cannot.</strong> A key hardcoded in ordinary
+        source is not matched by any denylist, so <code>INIT_CODEBASE_PROMPT</code> requires
+        recording that such a secret exists and where, never its value.</li>
+      </ul>
+      <p>If you extend the scan, add the glob before adding the capability. Other things that hold:</p>
+      <ul>
+        <li>The GitHub token is read from the environment in <code>github._token</code> per request
+        and only ever sent as an <code>Authorization</code> header to <code>api.github.com</code>. It
+        is never logged, never written to <code>.praline/</code>, never interpolated into a message,
+        and never put in a URL. Error paths raise on the response, which does not carry request
+        headers. Same rules for the Slack token, which only reaches <code>slack.com</code>.</li>
+        <li>A token can arrive from somewhere PRaline does not control: a git remote of the form
+        <code>https://ghp_xxx@github.com/owner/repo</code>. <code>github.redact_url</code> strips the
+        userinfo part before that string can reach an error message. If you print a remote URL
+        anywhere, print it through that function.</li>
+        <li>Credentials are stripped from the review subprocess environment; see
+        <a href="#claude">The Claude backend</a>.</li>
+        <li><code>cli._warn_if_praline_dir_committable</code> runs <code>git check-ignore</code> at
+        start-up and warns when <code>.praline/</code> is not ignored in the target repo. That
+        directory holds the knowledge base, the review log and possibly a Slack config.</li>
+        <li>System prompts are passed on argv, so they are visible to other users on the same machine
+        via the process list. That covers the knowledge base and the diff-free part of a review, which
+        is repo-internal but not secret. Do not move anything sensitive into that argument.</li>
+        <li><code>.praline/</code> lives in the reviewed repo and describes it in detail. PRaline
+        warns when it is not ignored but cannot fix it, since it never commits.</li>
+        <li>A PR diff or description is untrusted input that ends up in a prompt. The interactive
+        approval loop is what stands between that and a posted comment. Auto mode removes it
+        deliberately, which is the reason it is opt-in per invocation.</li>
+      </ul>
+
+      <h2 id="invariants">Invariants</h2>
+      <p>These are promises the README makes to users. A PR that breaks one will be rejected regardless of how useful the feature is.</p>
+      <ul>
+        <li><strong>No write-to-code endpoints.</strong> Every function in <code>github.py</code> maps to a read endpoint, a comment endpoint, or the review-request endpoint. When adding a GitHub call, keep it inside the ALLOWED list documented at the top of that file — and note what is <em>not</em> there: approving, merging, and opening or editing issues.</li>
+        <li><strong>No auto-posting outside <code>praline auto</code>.</strong> The interactive menu's comments flow through <code>run_approval_loop</code> and the final confirmation; nothing in <code>cli._do_review</code> may skip them. <code>auto.run_auto</code> is the one deliberate exception, gated behind its own subcommand.</li>
+        <li><strong>No API key.</strong> The model backend stays the <code>claude</code> CLI. Do not introduce <code>anthropic</code> SDK calls or key handling.</li>
+        <li><strong>No tools beyond read-only, and never without the denylist.</strong> The codebase scan and huge-PR explore mode are the only tool-enabled calls. If you add another, pass <code>READ_ONLY_TOOLS</code> and <code>SECRET_DENY_RULES</code> together; a write or shell tool would break the "never touches code" promise outright.</li>
+        <li><strong>Credentials never reach a subprocess or a log line.</strong> Tokens are read from the environment at the point of use, sent only to their own API host, and stripped from the <code>claude</code> child environment. Nothing writes one to disk, and no error message may interpolate one.</li>
+        <li><strong>Slack only ever sends, and only to people.</strong> The four methods called are <code>auth.test</code>, a user lookup, <code>conversations.open</code> and <code>chat.postMessage</code> to a DM or group DM. No channels, no history reads, and a Slack failure never rolls back or blocks a review.</li>
+        <li><strong>The review reply is JSON with a fixed schema.</strong> The schema lives in <code>prompts.DEFAULT_REVIEW_PROMPT</code> and its consumers are <code>run_approval_loop</code> and <code>post_accepted_comments</code>. Change all of them together, and remember users can supply custom prompt files that must still produce the same schema.</li>
+      </ul>
+
+      <h2 id="recipes">Where changes go</h2>
+      <div class="tablewrap">
+      <table>
+        <tr><th>You want to...</th><th>Touch</th></tr>
+        <tr><td>Add a menu action</td><td><code>cli._main_menu</code> plus a <code>_do_*</code> helper next to the existing ones; take a <code>config.Run</code> rather than loose arguments.</td></tr>
+        <tr><td>Add a global setting or flag</td><td><code>cli._add_common_args</code> for the flag, a field on <code>config.Run</code> for the value. Both modes then see it without any signature changes.</td></tr>
+        <tr><td>Change how reviews behave</td><td><code>prompts.py</code> first. Most behavior (tone, priorities, reply-before-comment) is prompt-defined, not code-defined.</td></tr>
+        <tr><td>Add a GitHub operation</td><td><code>github.py</code>, respecting the ALLOWED list. Return plain data (dataclasses or dicts); rendering belongs to callers.</td></tr>
+        <tr><td>Change what a review sees</td><td><code>reviewer.review_pr</code> and <code>_format_existing_conversation</code> for the user message, <code>_build_review_prompt</code> for the system side.</td></tr>
+        <tr><td>Change the approval UX</td><td><code>reviewer.run_approval_loop</code>, <code>_display_comment</code>, <code>_prompt_action</code>.</td></tr>
+        <tr><td>Change knowledge-base content</td><td><code>prompts.INIT_CODEBASE_PROMPT</code> (first build), <code>INIT_REPO_PROMPT</code> (updates) or <code>INIT_PR_HISTORY_PROMPT</code>; the surrounding pipeline is <code>memory.py</code>.</td></tr>
+        <tr><td>Change how the knowledge base reads</td><td><code>prompts.KB_STYLE</code>. It is appended to all three knowledge-base prompts, so the rules stay in one place.</td></tr>
+        <tr><td>Restyle the knowledge-base page</td><td><code>praline/templates/knowledge.html</code>. No Python involved.</td></tr>
+        <tr><td>Add a stored file under <code>.praline/</code></td><td><code>config.py</code> for the path and load/save helpers, then use them from wherever needs it.</td></tr>
+        <tr><td>Change auto-mode selection or posting</td><td><code>auto.select_prs</code> for which PRs qualify, <code>auto.run_auto</code> for the review/post/summary loop.</td></tr>
+        <tr><td>Change the review order or the new/updated icons</td><td><code>watch.order_prs</code> and <code>watch.classify</code>. Both modes read them, so a change lands everywhere at once.</td></tr>
+        <tr><td>Change a Slack message</td><td><code>slack.review_message</code> (per PR) or <code>slack.digest_message</code> (the round-up). Delivery is <code>notify_review</code> / <code>notify_digest</code>; keep failures non-fatal.</td></tr>
+        <tr><td>Add or change a verdict</td><td><code>verdict.STATUS_LABEL</code> and <code>verdict.status_key</code>, plus the status guide in <code>prompts.DEFAULT_REVIEW_PROMPT</code>. The three renderers (CLI, auto summary, Slack) all read the same helpers.</td></tr>
+        <tr><td>Record something about past reviews</td><td><code>reviewer.log_review</code> for the entry, <code>_format_review_log</code> for what the prompt sees.</td></tr>
+      </table>
+      </div>
+
+      <h2 id="gotchas">Gotchas</h2>
+      <ul>
+        <li><strong>Resolving review threads is GraphQL-only.</strong> GitHub's REST API cannot mark a conversation resolved, so <code>github.py</code> carries two small GraphQL calls (<code>find_review_thread_id</code>, <code>resolve_review_thread</code>). Everything else is REST.</li>
+        <li><strong><code>reply_to_id</code> must be the thread's root comment.</strong> Replying to a reply detaches the comment from its thread. The prompt instructs the model accordingly; keep that instruction if you rewrite it.</li>
+        <li><strong><code>get_merged_prs</code> paginates by <code>updated</code>, not <code>merged_at</code>.</strong> The early-exit condition is deliberately conservative (a whole page must be older than the cutoff) and there is a hard cap of 10 pages. Easy to break if you "simplify" it.</li>
+        <li><strong>Claude sometimes wraps JSON in code fences.</strong> <code>reviewer._extract_json</code> tries the raw text, then a fenced block, then the outermost <code>{...}</code>, and keeps the first that parses. Removing this "redundant" code will produce intermittent parse failures.</li>
+        <li><strong>The same goes for prose around a document.</strong> <code>memory._strip_preamble</code> drops anything before the first markdown heading, because a scan that used tools sometimes opens with a sentence about what it read. The prompts forbid it; the strip is the backstop.</li>
+        <li><strong>The HTML template uses <code>safe_substitute</code>, not <code>substitute</code>.</strong> It contains literal <code>$</code> characters in its prose, which <code>substitute</code> would reject as bad placeholders. Keep the placeholders (<code>$title</code>, <code>$repo</code>, <code>$toc</code>, <code>$body</code>) distinctive if you edit it.</li>
+        <li><strong>The knowledge files live in the reviewed repo.</strong> Consider suggesting <code>.praline/</code> for that repo's <code>.gitignore</code>; PRaline itself never commits anything, so it cannot do this for the user.</li>
+        <li><strong><code>get_repo_structure</code> / <code>get_recent_commits</code> take an explicit ref.</strong> They read <code>git ls-tree</code> / <code>git log &lt;ref&gt;</code>, not the working tree or <code>HEAD</code>. Callers outside <code>build_repo_knowledge</code> must still pass a ref (e.g. <code>"HEAD"</code>) if they want the local checkout.</li>
+        <li><strong>Subparser defaults must be <code>SUPPRESS</code>.</strong> <code>_add_common_args</code> is called on the top-level parser and on every subparser so <code>--dir</code> works on either side of the subcommand. argparse applies a subparser's defaults <em>after</em> the top-level parse, so a real default on the subparser silently overwrites what the user passed before the subcommand — which is why <code>_add_common_args(..., subcommand=True)</code> swaps every default for <code>argparse.SUPPRESS</code>. Add a new shared flag through that function, never directly to a subparser.</li>
+        <li><strong>Comment lists are cached per run.</strong> <code>github._COMMENT_CACHE</code> makes the three readers of a PR's comments (status line, prompt conversation, reply lookup) cost one fetch each instead of three. Every posting function calls <code>forget_pr_comments</code>; if you add another write path, call it too or the next read will be stale.</li>
+        <li><strong>Line comments take the head sha from the caller.</strong> <code>post_pr_review_comment</code> no longer refetches the PR per comment — pass <code>pr.head_sha</code>, which also pins the comment to the commit that was actually reviewed.</li>
+        <li><strong>You cannot request a review from the PR author.</strong> GitHub answers 422, so <code>rerequest_review</code> skips your own PRs. Anything else it fails on is printed and ignored.</li>
+        <li><strong><code>PRInfo</code> counts are only populated on single-PR fetches.</strong> The list endpoint omits <code>additions</code>/<code>deletions</code>/<code>changed_files</code>, so those default to 0 until <code>get_pr</code> is called; that is why <code>get_pr_status</code> and <code>auto.run_auto</code> both refetch. <code>draft</code> and <code>updated_at</code>, by contrast, are present on the list endpoint already.</li>
+      </ul>
+
+      </article>
+    </main>
+  </div>
+  <footer><span class="prompt">$</span> PRaline developer guide 🍫 also see the <a href="https://github.com/ameroyer/PRaline">README</a> for user-facing docs</footer>
+</div>
+</body>
+</html>

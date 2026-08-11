@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<style>
+  /* light pastel rice theme — soft pink/lavender/mint on cream,
+     with a deeper (but equally pastel) variant for forced dark mode */
+  :root {
+    --bg: #fdf7fb;
+    --surface: #ffffff;
+    --surface2: #f7eef8;
+    --ink: #382c44;
+    --muted: #8c7a9a;
+    --line: #ecdcf0;
+    --pink: #c2488c;
+    --purple: #7c56c9;
+    --mint: #1f9d78;
+    --peach: #c9791c;
+    --shadow: rgba(150, 110, 160, 0.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1726; --surface: #241e33; --surface2: #2c2440;
+      --ink: #f3e9f7; --muted: #a996c4; --line: #4a3d63;
+      --pink: #f6a9cf; --purple: #c9a4f5; --mint: #92e8c9; --peach: #ffcf96;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #fdf7fb; --surface: #ffffff; --surface2: #f7eef8;
+    --ink: #382c44; --muted: #8c7a9a; --line: #ecdcf0;
+    --pink: #c2488c; --purple: #7c56c9; --mint: #1f9d78; --peach: #c9791c;
+    --shadow: rgba(150, 110, 160, 0.14);
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c1726; --surface: #241e33; --surface2: #2c2440;
+    --ink: #f3e9f7; --muted: #a996c4; --line: #4a3d63;
+    --pink: #f6a9cf; --purple: #c9a4f5; --mint: #92e8c9; --peach: #ffcf96;
+    --shadow: rgba(0, 0, 0, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.7; font-size: 16px; -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(circle at 10% 0%, color-mix(in srgb, var(--pink) 7%, transparent), transparent 40%),
+      radial-gradient(circle at 90% 4%, color-mix(in srgb, var(--purple) 8%, transparent), transparent 40%);
+    background-attachment: fixed;
+  }
+  .shell { max-width: 1080px; margin: 0 auto; padding: 2.5rem 1.5rem 5rem; }
+  header.masthead {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1.1rem 1.4rem; margin-bottom: 1.8rem; box-shadow: 0 6px 20px var(--shadow);
+  }
+  header.masthead .termbar { display: flex; gap: 0.4rem; margin-bottom: 0.8rem; }
+  header.masthead .termbar span { width: 0.55rem; height: 0.55rem; border-radius: 50%; }
+  header.masthead .termbar span:nth-child(1) { background: var(--pink); }
+  header.masthead .termbar span:nth-child(2) { background: var(--peach); }
+  header.masthead .termbar span:nth-child(3) { background: var(--mint); }
+  header.masthead .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.72rem; letter-spacing: 0.02em; color: var(--muted);
+  }
+  header.masthead .eyebrow .prompt { color: var(--mint); }
+  header.masthead h1 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.35rem; margin: 0.3rem 0 0; text-wrap: balance; font-weight: 700;
+    background: linear-gradient(90deg, var(--pink), var(--purple));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+
+  .layout { display: flex; gap: 2.2rem; align-items: flex-start; }
+  nav.toc {
+    flex: none; width: 232px; position: sticky; top: 2rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 1rem 1.1rem; box-shadow: 0 4px 14px var(--shadow);
+    max-height: calc(100vh - 4rem); overflow-y: auto;
+  }
+  nav.toc .toc-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 0.6rem; display: block;
+  }
+  nav.toc ul { list-style: none; padding-left: 0; margin: 0; }
+  nav.toc ul ul { padding-left: 0.9rem; margin-top: 0.25rem; }
+  nav.toc li { margin: 0; }
+  nav.toc li + li { margin-top: 0.45rem; }
+  nav.toc a {
+    color: var(--ink); text-decoration: none; font-size: 0.86rem; display: block;
+    border-left: 2px solid transparent; padding-left: 0.6rem;
+  }
+  nav.toc ul ul a { font-size: 0.8rem; color: var(--muted); }
+  nav.toc a:hover { color: var(--pink); border-left-color: var(--pink); }
+
+  main { flex: 1; min-width: 0; overflow-wrap: break-word; }
+  main > article {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+    padding: 0.4rem 2rem 2.2rem; box-shadow: 0 4px 14px var(--shadow);
+  }
+  h2 {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 1.15rem; margin: 2.4rem 0 0.7rem; padding-top: 1.4rem;
+    border-top: 1px dashed var(--line);
+    display: flex; align-items: center; gap: 0.55rem; color: var(--pink);
+    text-wrap: balance; scroll-margin-top: 1.5rem;
+  }
+  h2:first-of-type { margin-top: 1.4rem; border-top: none; padding-top: 0; }
+  h2::before { content: "//"; color: var(--muted); font-weight: 400; }
+  h2:nth-of-type(3n+2) { color: var(--purple); }
+  h2:nth-of-type(3n) { color: var(--mint); }
+  h3 {
+    font-size: 1rem; color: var(--purple); margin: 1.6rem 0 0.6rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    scroll-margin-top: 1.5rem;
+  }
+  p { margin: 0.7rem 0; max-width: 42rem; }
+  p, li { font-size: 0.97rem; }
+  ul, ol { padding-left: 1.3rem; margin: 0.7rem 0; }
+  li + li { margin-top: 0.4rem; }
+  li::marker { color: var(--mint); }
+  a { color: var(--pink); text-decoration-color: color-mix(in srgb, var(--pink) 45%, transparent); }
+  strong { color: var(--pink); font-weight: 700; }
+  em { color: var(--mint); font-style: italic; }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--surface2); color: var(--peach);
+    padding: 0.15rem 0.4rem; border-radius: 5px; font-size: 0.85em;
+    border: 1px solid var(--line);
+  }
+  pre {
+    background: var(--surface2); border: 1px solid var(--line); border-radius: 10px;
+    overflow-x: auto; margin: 1rem 0;
+  }
+  pre code { display: block; padding: 1rem 1.1rem; background: none; border: none; color: var(--ink); }
+  blockquote {
+    margin: 1.1rem 0; padding: 0.8rem 1.1rem; border-radius: 8px;
+    border-left: 3px solid var(--peach);
+    background: color-mix(in srgb, var(--peach) 10%, var(--surface));
+  }
+  blockquote p { margin: 0; color: var(--ink); max-width: none; }
+  blockquote::before { content: "⚠ "; color: var(--peach); }
+  table {
+    width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: 0.88rem;
+    overflow-x: auto; display: block; border: 1px solid var(--line); border-radius: 8px;
+  }
+  th, td { text-align: left; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--purple); font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  tr:last-child td { border-bottom: none; }
+  hr { border: none; border-top: 1px dashed var(--line); margin: 2.2rem 0; }
+  footer {
+    margin-top: 2rem; padding-top: 1rem;
+    font-size: 0.78rem; color: var(--muted); text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  footer .prompt { color: var(--mint); }
+
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    nav.toc {
+      position: static; width: 100%; max-height: none;
+    }
+    nav.toc ul { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    nav.toc li + li { margin-top: 0; }
+    nav.toc ul ul { display: none; }
+    nav.toc a {
+      border: 1px solid var(--line); border-radius: 999px; padding: 0.3rem 0.8rem;
+    }
+    main > article { padding: 0.4rem 1.2rem 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <header class="masthead">
+    <div class="termbar"><span></span><span></span><span></span></div>
+    <div class="eyebrow"><span class="prompt">$</span> cat knowledge_base.md</div>
+    <h1>$repo</h1>
+  </header>
+  <div class="layout">
+    <nav class="toc">
+      <span class="toc-label">Contents</span>
+      $toc
+    </nav>
+    <main>
+      <article>
+$body
+      </article>
+    </main>
+  </div>
+  <footer><span class="prompt">$</span> generated by PRaline 🍫</footer>
+</div>
+</body>
+</html>
