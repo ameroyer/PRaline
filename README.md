@@ -1,10 +1,15 @@
-<img align="right" src="praline_logo.png" width="300" >
+<img align="right" src="praline_logo.png" width="275" >
 
 # PRaline
 
-An interactive CLI that reviews your GitHub pull requests with Claude Code as the LLM backend — no API key needed, it rides your existing Claude Code subscription.
+An interactive CLI that reviews your GitHub pull requests with Claude Code as the LLM backend. No API key needed, it rides your existing Claude Code subscription. 
+
+This is meant as a lighter, more "human friendly" quick first review, than e.g. tools like Copilot. It also includes features such as building a human-readable knowledge base of your repo, PR by PR, and sending Slack notification when reviews are done. 
 
 **Disclaimer:** This is fully vibe-coded
+
+<p align="center"><img width="50%" alt="image" src="https://github.com/user-attachments/assets/be34feed-3538-41a9-a5b6-c4ccc2b28493" /></p>
+
 
 ## What it does
 
