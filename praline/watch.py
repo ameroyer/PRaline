@@ -172,12 +172,12 @@ def run_check(repo_dir: Path, repo: str, mark: bool | None = True) -> int:
     fresh = [c for c in changes if c.status != SEEN]
 
     print(f"\n{_rule('═')}")
-    header = f"New or updated since {previous}" if previous else "Open PRs — first check"
+    header = f"New or updated since {previous}" if previous else "Open PRs, first check"
     print(_c(header, BOLD))
     print(_rule("═"))
 
     if first:
-        print(_c("First check on this repo — everything is new by definition.", DIM))
+        print(_c("First check on this repo, so everything is new by definition.", DIM))
     if not prs:
         print(_c("No open PRs at all. Enjoy the quiet.", GREEN))
     elif not fresh:

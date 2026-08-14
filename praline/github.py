@@ -43,6 +43,8 @@ from pathlib import Path
 
 import requests
 
+from .claude_client import FETCH_TOKEN_ENV
+
 API_ROOT = "https://api.github.com"
 
 
@@ -104,6 +106,70 @@ def _git(repo_dir: Path, *args: str) -> str:
         cwd=repo_dir,
     )
     return result.stdout
+
+
+class FetchError(RuntimeError):
+    """A fetch failed over both the remote's own credentials and the token."""
+
+
+# Fetching through `origin` uses whatever credentials the remote is configured
+# for, usually an ssh key. That is the one thing PRaline cannot assume: a tmux
+# session outliving the ssh agent that started it, or a machine with no key
+# loaded, leaves every fetch dead — while the GitHub token PRaline already
+# requires would have worked. So a failed fetch is retried over HTTPS with that
+# token, and only a failure of both is reported.
+#
+# The token reaches git through the environment and is named, not inlined, in
+# the credential helper: the value never appears in argv (where `ps` would show
+# it to every user on the machine) and is never written to .git/config. The
+# empty `credential.helper=` first resets the helper list, so a system helper
+# configured elsewhere cannot answer ahead of this one with the wrong account.
+_CREDENTIAL_HELPER = (
+    f'!f() {{ echo username=x-access-token; echo "password=${FETCH_TOKEN_ENV}"; }}; f'
+)
+
+
+def _try_git(repo_dir: Path, *args: str, env: dict | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, cwd=repo_dir, env=env
+    )
+
+
+def _first_line(stderr: str) -> str:
+    """The one line of a git failure worth showing, with any credentials in a
+    remote URL stripped out of it."""
+    lines = [ln.strip() for ln in (stderr or "").splitlines() if ln.strip()]
+    return redact_url(lines[0]) if lines else "git fetch failed"
+
+
+def fetch_refs(repo_dir: Path, repo: str, *refspecs: str) -> None:
+    """Fetch `refspecs` into the local repo, by whatever credentials work.
+
+    Both attempts use the same explicit refspecs, so what ends up in
+    `refs/remotes/` does not depend on which one succeeded. Like every fetch
+    here, this only writes remote-tracking refs and objects: the working tree,
+    the index and local branches are untouched."""
+    attempt = _try_git(repo_dir, "fetch", "--quiet", "origin", *refspecs)
+    if attempt.returncode == 0:
+        return
+
+    try:
+        token = _token()
+    except RuntimeError:
+        # Nothing to retry with. Report what the remote actually said, since
+        # that is the failure the user has to act on.
+        raise FetchError(_first_line(attempt.stderr))
+
+    with_token = _try_git(
+        repo_dir,
+        "-c", "credential.helper=",
+        "-c", f"credential.helper={_CREDENTIAL_HELPER}",
+        "fetch", "--quiet", f"https://github.com/{repo}", *refspecs,
+        env={**os.environ, FETCH_TOKEN_ENV: token, "GIT_TERMINAL_PROMPT": "0"},
+    )
+    if with_token.returncode == 0:
+        return
+    raise FetchError(_first_line(with_token.stderr) or _first_line(attempt.stderr))
 
 
 def redact_url(url: str) -> str:
@@ -198,16 +264,18 @@ def get_pr_diff(repo: str, number: int) -> str:
     return resp.text
 
 
-def fetch_pr_refs(repo_dir: Path, pr: PRInfo) -> None:
+def fetch_pr_refs(repo_dir: Path, repo: str, pr: PRInfo) -> None:
     """Fetch the PR's base branch and its hidden head ref (`pull/N/head`) so
-    both sides of the diff exist locally. Like every fetch here, this only
-    writes remote-tracking refs and objects, never the working tree."""
+    both sides of the diff exist locally."""
     try:
-        _git(repo_dir, "fetch", "--quiet", "origin", pr.base_branch, f"pull/{pr.number}/head")
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Could not fetch PR #{pr.number} from origin: {(e.stderr or '').strip() or e}"
+        fetch_refs(
+            repo_dir,
+            repo,
+            f"+refs/heads/{pr.base_branch}:refs/remotes/origin/{pr.base_branch}",
+            f"+refs/pull/{pr.number}/head:refs/remotes/origin/pull/{pr.number}",
         )
+    except FetchError as e:
+        raise FetchError(f"Could not fetch PR #{pr.number}: {e}")
 
 
 def get_pr_diff_local(repo_dir: Path, pr: PRInfo) -> str:
@@ -289,18 +357,12 @@ def get_default_branch(repo: str) -> str:
     return _request("GET", f"/repos/{repo}").json()["default_branch"]
 
 
-def fetch_remote_branch(repo_dir: Path, branch: str) -> str | None:
-    """Fetch `branch`'s remote-tracking ref and return it (e.g. 'origin/main'),
-    or None if the fetch failed: no network, no credentials for the remote, or
-    an ssh remote with no key loaded. Callers fall back to the local checkout.
+def fetch_remote_branch(repo_dir: Path, repo: str, branch: str) -> str:
+    """Fetch `branch`'s remote-tracking ref and return it (e.g. 'origin/main').
 
-    `git fetch` only updates refs/remotes/*; it never touches the working
-    tree, the index, or local branches, so this is safe to call regardless
-    of what the user currently has checked out."""
-    try:
-        _git(repo_dir, "fetch", "--quiet", "origin", branch)
-    except subprocess.CalledProcessError:
-        return None
+    Raises FetchError if neither the remote's own credentials nor the GitHub
+    token can reach it; callers fall back to reading the local checkout."""
+    fetch_refs(repo_dir, repo, f"+refs/heads/{branch}:refs/remotes/origin/{branch}")
     return f"origin/{branch}"
 
 
@@ -345,6 +407,18 @@ def forget_pr_comments(repo: str, number: int) -> None:
         _COMMENT_CACHE.pop((kind, repo, number), None)
 
 
+def forget_all_comments() -> None:
+    """Empty the cache completely.
+
+    The cache is scoped to one look at a PR: posting invalidates the entries it
+    could have staled, and a one-shot command exits before anything else can.
+    A monitor does neither — it runs for hours — so without this a comment left
+    by someone between two passes would never be seen, and a re-review would be
+    written against a conversation that has moved on. Called at the top of
+    every pass."""
+    _COMMENT_CACHE.clear()
+
+
 def get_pr_review_comments(repo: str, number: int) -> list[dict]:
     """Line-level review comments on the PR diff, including replies (has 'in_reply_to_id')."""
     return _cached_comments("review", repo, number, f"/repos/{repo}/pulls/{number}/comments")
@@ -371,24 +445,35 @@ def post_pr_comment(repo: str, number: int, body: str) -> None:
 
 
 def post_pr_review_comment(
-    repo: str, number: int, body: str, path: str, line: int, commit_id: str
+    repo: str,
+    number: int,
+    body: str,
+    path: str,
+    line: int,
+    commit_id: str,
+    start_line: int | None = None,
 ) -> None:
     """Post a line-level review comment on the PR diff.
 
     `commit_id` is the head sha the review was written against; the caller
     already holds it, and pinning the comment to the exact commit that was
-    reviewed is both cheaper and more correct than re-reading the PR here."""
-    _request(
-        "POST",
-        f"/repos/{repo}/pulls/{number}/comments",
-        json={
-            "body": body,
-            "path": path,
-            "commit_id": commit_id,
-            "line": line,
-            "side": "RIGHT",
-        },
-    )
+    reviewed is both cheaper and more correct than re-reading the PR here.
+
+    `start_line` anchors the comment to a range ending at `line`, which is what
+    a multi-line ```suggestion replaces. GitHub rejects a range that isn't
+    strictly before the end line, so an equal or larger `start_line` is dropped
+    back to a single-line comment rather than sent and refused."""
+    payload = {
+        "body": body,
+        "path": path,
+        "commit_id": commit_id,
+        "line": line,
+        "side": "RIGHT",
+    }
+    if start_line and start_line < line:
+        payload["start_line"] = start_line
+        payload["start_side"] = "RIGHT"
+    _request("POST", f"/repos/{repo}/pulls/{number}/comments", json=payload)
     forget_pr_comments(repo, number)
 
 

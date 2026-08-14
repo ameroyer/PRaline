@@ -295,7 +295,7 @@ def digest_message(repo: str, reviewed: list[dict]) -> str:
             counts = ""
             if r.get("comments_added") or r.get("comments_left"):
                 counts = (
-                    f" — {r.get('comments_added', 0)} comment(s), "
+                    f": {r.get('comments_added', 0)} comment(s), "
                     f"{r.get('comments_left', 0)} reply(ies)"
                 )
             lines.append(f"• <{r.get('url', '')}|#{r.get('number')} {r.get('title', '')}>{counts}")

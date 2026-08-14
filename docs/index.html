@@ -185,12 +185,17 @@
         <li><a href="#setup">Dev setup</a></li>
         <li><a href="#layout-code">Code layout</a></li>
         <li><a href="#review-flow">How a review runs</a></li>
+        <li><a href="#depth">Review depth</a></li>
+        <li><a href="#suggestions">Suggested changes</a></li>
         <li><a href="#auto-mode">Auto mode</a></li>
+        <li><a href="#monitor">Monitor mode &amp; budgets</a></li>
         <li><a href="#watching">What's new, and PR order</a></li>
         <li><a href="#slack">Slack notifications</a></li>
         <li><a href="#review-log">The review log</a></li>
         <li><a href="#huge-prs">Huge PRs</a></li>
         <li><a href="#knowledge">The knowledge base</a></li>
+        <li><a href="#module-map">The module map</a></li>
+        <li><a href="#mcp">The MCP server</a></li>
         <li><a href="#claude">The Claude backend</a></li>
         <li><a href="#security">Secrets and data flow</a></li>
         <li><a href="#invariants">Invariants</a></li>
@@ -240,19 +245,25 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       <div class="tablewrap">
       <table>
         <tr><th>Module</th><th class="num">Lines</th><th>Job</th></tr>
-        <tr><td><code>cli.py</code></td><td class="num">~430</td><td>Entry point (<code>praline = praline.cli:main</code>). Argument parsing and the main menu. All <code>input()</code> prompts live here or in <code>reviewer.py</code>.</td></tr>
-        <tr><td><code>github.py</code></td><td class="num">~480</td><td>Every GitHub call, REST and GraphQL, via <code>requests</code> (no <code>gh</code> CLI dependency), plus local git helpers and the per-run comment cache. This is the safety boundary; see <a href="#invariants">Invariants</a>.</td></tr>
-        <tr><td><code>reviewer.py</code></td><td class="num">~470</td><td>Assembles the review request, parses Claude's JSON reply, flattens it into postable items, runs the approval loop, posts accepted comments, writes the review log and re-requests your review.</td></tr>
-        <tr><td><code>prompts.py</code></td><td class="num">~280</td><td>The four system prompts (PR review, codebase scan, repo knowledge, PR history) plus <code>KB_STYLE</code>, the writing rules shared by the three knowledge-base prompts. The review output schema is defined here, in prose.</td></tr>
-        <tr><td><code>memory.py</code></td><td class="num">~210</td><td>Builds and updates the knowledge base under <code>.praline/</code>, renders it to markdown and HTML.</td></tr>
-        <tr><td><code>auto.py</code></td><td class="num">~175</td><td>Non-interactive mode (<code>praline auto</code>): picks PRs, reviews them, posts every comment, no prompts. See <a href="#auto-mode">Auto mode</a>.</td></tr>
+        <tr><td><code>cli.py</code></td><td class="num">~465</td><td>Entry point (<code>praline = praline.cli:main</code>). Argument parsing and the main menu. All <code>input()</code> prompts live here or in <code>reviewer.py</code>.</td></tr>
+        <tr><td><code>github.py</code></td><td class="num">~550</td><td>Every GitHub call, REST and GraphQL, via <code>requests</code> (no <code>gh</code> CLI dependency), plus local git helpers and the per-run comment cache. This is the safety boundary; see <a href="#invariants">Invariants</a>.</td></tr>
+        <tr><td><code>reviewer.py</code></td><td class="num">~510</td><td>Assembles the review request, flattens Claude's reply into postable items, runs the approval loop, posts accepted comments, writes the review log and re-requests your review.</td></tr>
+        <tr><td><code>prompts.py</code></td><td class="num">~385</td><td>The system prompts (PR review, codebase scan, repo knowledge, PR history, module map) plus <code>KB_STYLE</code>, the writing rules shared by the knowledge-base prompts. The review output schema is defined here, in prose.</td></tr>
+        <tr><td><code>memory.py</code></td><td class="num">~220</td><td>Decides what the knowledge base <em>says</em>: scans the codebase, folds in merged PRs, guards against a rewrite erasing the previous document. Rendering lives in <code>render.py</code>.</td></tr>
+        <tr><td><code>monitor.py</code></td><td class="num">~160</td><td>The unattended watch loop (<code>praline monitor</code>): one loop around <code>auto.run_auto</code> that survives failures and waits out an exhausted budget. See <a href="#monitor">Monitor mode</a>.</td></tr>
+        <tr><td><code>budget.py</code></td><td class="num">~155</td><td>The rolling-window token cap. Pure, imports nothing from the package, and <code>claude_client.ask</code> is its only caller. See <a href="#monitor">Monitor mode</a>.</td></tr>
+        <tr><td><code>auto.py</code></td><td class="num">~185</td><td>Non-interactive mode (<code>praline auto</code>): picks PRs, reviews them, posts every comment, no prompts. See <a href="#auto-mode">Auto mode</a>.</td></tr>
         <tr><td><code>slack.py</code></td><td class="num">~330</td><td>Optional Slack notifications: config loading, user resolution, the author/reviewer group chat, and the reviewer round-up. Depends only on <code>verdict</code> and <code>term</code>.</td></tr>
         <tr><td><code>verdict.py</code></td><td class="num">~90</td><td>What a finished review is, as pure functions over dicts: the <code>ready</code>/<code>minor</code>/<code>wip</code> vocabulary, <code>flatten_review</code>, <code>overview_of</code>, <code>count_items</code>, <code>reviewed_entry</code>. Imports nothing, so any module can read a review without pulling in another.</td></tr>
-        <tr><td><code>watch.py</code></td><td class="num">~200</td><td>What changed since the last look (<code>seen_state.json</code>, the 🆕/🔄 icons) and <code>order_prs</code>, the stack-aware review order shared by the CLI and auto mode.</td></tr>
-        <tr><td><code>claude_client.py</code></td><td class="num">~155</td><td>One function, <code>ask()</code>. Runs a single headless <code>claude</code> turn and returns its text. Owns the tool allow/deny lists and strips credentials from the child environment.</td></tr>
-        <tr><td><code>config.py</code></td><td class="num">~175</td><td>Paths and load/save helpers for the <code>.praline/</code> files, plus <code>Run</code>, the dataclass holding one invocation's settings. No logic beyond file IO.</td></tr>
+        <tr><td><code>watch.py</code></td><td class="num">~205</td><td>What changed since the last look (<code>seen_state.json</code>, the 🆕/🔄 icons) and <code>order_prs</code>, the stack-aware review order shared by the CLI and auto mode.</td></tr>
+        <tr><td><code>claude_client.py</code></td><td class="num">~190</td><td>Owns the model: <code>ask()</code> runs a single headless <code>claude</code> turn and returns its text, <code>extract_json()</code> parses a reply that was meant to be JSON. Holds the tool allow/deny lists and strips credentials from the child environment.</td></tr>
+        <tr><td><code>config.py</code></td><td class="num">~195</td><td>Paths and load/save helpers for the <code>.praline/</code> files, plus <code>Run</code>, the dataclass holding one invocation's settings. No logic beyond file IO.</td></tr>
+        <tr><td><code>render.py</code></td><td class="num">~150</td><td>Turns the knowledge base into documents: the combined markdown file, and the HTML page with the stat tiles and module map. Calls nothing but <code>markdown</code> and the template, so it can be exercised on its own.</td></tr>
+        <tr><td><code>hardness.py</code></td><td class="num">~155</td><td>The four review depth levels. Mostly prose: one prompt addendum per level, plus <code>clamp</code>, <code>label</code> and <code>explores</code>. Imports nothing. See <a href="#depth">Review depth</a>.</td></tr>
+        <tr><td><code>graph.py</code></td><td class="num">~115</td><td>Asks Claude for the repo's module map and <em>validates</em> what comes back, plus the git-counted stat tiles. See <a href="#module-map">The module map</a>.</td></tr>
+        <tr><td><code>mcp_server.py</code></td><td class="num">~370</td><td>The optional MCP server (<code>praline-mcp</code>), exposing the same operations as tools for Claude. See <a href="#mcp">The MCP server</a>.</td></tr>
         <tr><td><code>term.py</code></td><td class="num">~30</td><td>ANSI colors, <code>_c</code> / <code>_rule</code>, and <code>confirm()</code>, the shared yes/no prompt. Used by every module that prints.</td></tr>
-        <tr><td><code>templates/<wbr>knowledge.html</code></td><td class="num">~200</td><td>Not code: the standalone HTML shell for the knowledge base, filled in by <code>memory.render_knowledge_html</code>.</td></tr>
+        <tr><td><code>templates/<wbr>knowledge.html</code></td><td class="num">~540</td><td>Not code: the standalone HTML shell for the knowledge base, filled in by <code>render.knowledge_html</code>. Includes the dependency-free JavaScript that lays out the module map.</td></tr>
       </table>
       </div>
 
@@ -261,14 +272,17 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         (<code>repo_dir</code>, <code>repo</code>, <code>model</code>, <code>reviewer_login</code>,
         <code>request_review</code>, <code>slack</code>) travel as a single
         <code>config.Run</code>, built once in <code>cli.main</code> and handed to
-        <code>_main_menu</code>, <code>_do_review</code> and <code>run_auto</code> — a new setting
+        <code>_main_menu</code>, <code>_do_review</code> and <code>run_auto</code>. A new setting
         means one field, not five signatures. And a finished review is described in exactly one
         place, <code>verdict.reviewed_entry</code>, so the CLI summary and the Slack round-up cannot
         drift apart.
       </p>
 
       <h2 id="review-flow">How a review runs</h2>
-      <p>Menu option 1 ends up in <code>cli._do_review</code>, which drives this sequence:</p>
+      <p>
+        Menu option 1 ends up in <code>cli._do_review</code>, which drives this sequence. Note step 2: the knowledge base and the review log are appended to <em>every</em> review prompt, which is what makes reviews build on history rather than starting cold each time. <code>auto</code> and <code>monitor</code> warn when a repo has none rather than building one unattended.
+      </p>
+      <p>The sequence:</p>
       <ol>
         <li><code>github.list_open_prs</code> lists open PRs; the user picks one and sees a small status line (diff size, who has commented).</li>
         <li><code>reviewer.review_pr</code> fetches the raw diff and the full existing conversation (top-level comments plus line-level threads, tagged with comment ids), builds the system prompt from <code>prompts.DEFAULT_REVIEW_PROMPT</code> (or a custom prompt file) plus the knowledge base, and makes one <code>claude_client.ask</code> call.</li>
@@ -292,6 +306,57 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         empty list of new comments is treated as a good outcome, not a failure.
       </p>
 
+      <h2 id="depth">Review depth</h2>
+      <p>
+        <code>--hardness N</code> (<code>-H</code>, default <strong>0</strong>) says how hard to
+        look. It is one knob with four settings, and it lives entirely in
+        <code>hardness.py</code>: each level is a <code>Level</code> holding a name, a one-line
+        blurb for the UI, and an <code>addendum</code> that <code>reviewer._build_review_prompt</code>
+        appends to the system prompt.
+      </p>
+      <div class="tablewrap">
+      <table>
+        <tr><th>Level</th><th>Name</th><th>What changes</th></tr>
+        <tr><td class="num">0</td><td><code>light</code></td><td>Default. Only what would change the author's mind or the shape of the code. At most five comments, no style nits.</td></tr>
+        <tr><td class="num">1</td><td><code>standard</code></td><td>A full pass over every changed file.</td></tr>
+        <tr><td class="num">2</td><td><code>thorough</code></td><td>Adds a checklist: edge cases, error paths, resource handling, invariants, security, tests, real performance problems.</td></tr>
+        <tr><td class="num">3</td><td><code>exhaustive</code></td><td>Adversarial audit, and the review runs inside a read-only checkout so Claude can read around the diff.</td></tr>
+      </table>
+      </div>
+      <p>
+        Two properties are worth preserving if you touch this. Depth is <em>orthogonal</em> to the
+        prompt: it says how hard to look, not what to look for, so it is appended on top of a custom
+        prompt file rather than replacing it. And the level never changes the response contract:
+        the same JSON, the same severities, the same approval loop at every setting, so nothing
+        downstream has to know which level ran.
+      </p>
+      <p>
+        Level 3 is the only one that changes machinery. <code>hardness.explores(level)</code> is
+        true from <code>EXPLORE_FROM</code> up, and <code>reviewer._ask_in_checkout</code> then
+        fetches the PR head, adds a temporary detached worktree, and runs the turn there with
+        <code>Read</code>/<code>Glob</code>/<code>Grep</code> and the credential denylist, the same
+        guardrails as the codebase scan. If the checkout cannot be made, it falls back to reviewing
+        the diff alone rather than failing: the checkout is a convenience, not the review.
+      </p>
+      <p>
+        Adding a level means adding one entry to <code>LEVELS</code>. The CLI help, the menu, the
+        MCP tool description and <code>clamp()</code> all read the dict, so nothing else needs
+        touching.
+      </p>
+
+      <h2 id="suggestions">Suggested changes</h2>
+      <p>
+        When a fix is small and mechanical, the prompt asks for a
+        <code>```suggestion</code> block instead of a description of the fix. GitHub renders that
+        as a <em>Commit suggestion</em> button. This is prompt work plus one plumbing change: review
+        comments can now span a range.
+      </p>
+      <ul>
+        <li><code>comments[].start_line</code> is optional in the schema. <code>github.post_pr_review_comment</code> sends <code>start_line</code>/<code>start_side</code> only when it is strictly less than <code>line</code>, because GitHub rejects anything else, so an equal or larger value silently degrades to a single-line comment rather than erroring.</li>
+        <li><code>reviewer.has_suggestion</code> is the one place that decides whether an item carries a suggestion. The approval loop uses it twice: to mark the item 🔧, and to print the body <em>unwrapped</em>, since <code>textwrap.fill</code> would destroy the indentation GitHub commits.</li>
+        <li>The prompt is explicit that a wrong suggestion is worse than none. A committable-looking bad fix is the failure mode here, so anything uncertain is meant to come back as prose.</li>
+      </ul>
+
       <h2 id="auto-mode">Auto mode</h2>
       <p>
         <code>praline auto [PR ...]</code> runs the same review as the interactive menu, minus
@@ -301,13 +366,13 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       </p>
       <ol>
         <li><code>auto.select_prs</code> lists open PRs and keeps a PR if it was passed explicitly
-        as an argument, or if it is not a draft and has activity — its own <code>updated_at</code>,
-        or a comment created or edited — more recent than the last time this user auto-reviewed
+        as an argument, or if it is not a draft and has activity (its own <code>updated_at</code>,
+        or a comment created or edited) more recent than the last time this user auto-reviewed
         it. Explicit PR numbers skip both the draft and activity checks. The result is returned in
         <code>watch.order_prs</code> order (see <a href="#watching">below</a>), so stacks are
         reviewed bottom-up.</li>
         <li><code>auto._has_new_activity</code> checks the PR's own <code>updated_at</code> first and
-        only pays for the two comment endpoints when that says no — the fetch exists solely to catch
+        only pays for the two comment endpoints when that says no. The fetch exists solely to catch
         a comment edited in place without the PR being bumped.</li>
         <li>Per-user "last reviewed" timestamps live in <code>.praline/auto_state.json</code>
         (<code>config.load_auto_state</code> / <code>save_auto_state</code>), keyed by PR number,
@@ -321,12 +386,76 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <li>Each PR gets the same tail steps as an interactive review: log, re-request (unless <code>--no-request-review</code>), notify.</li>
         <li>A per-PR result (files changed, verdict, comments added, replies left, threads resolved,
         or the error if the review call failed) is collected and printed as a summary table at the
-        end, and — with <code>--slack</code> — DMed to you as a round-up grouped by verdict.</li>
+        end, and with <code>--slack</code> DMed to you as a round-up grouped by verdict.</li>
       </ol>
       <p>
         This is the one intentional exception to the "no auto-posting" invariant below: a human
         still approves every comment in the interactive menu, but auto mode exists precisely to
         skip that step for PRs the user has pointed it at.
+      </p>
+
+      <h2 id="monitor">Monitor mode &amp; budgets</h2>
+      <p>
+        <code>praline monitor</code> is a loop around <code>auto.run_auto</code>, which already
+        reviews exactly the PRs with activity since the last pass: non-draft, and skipping anything
+        already reviewed with nothing new on it. <code>monitor.py</code> adds only what turns a
+        one-shot command into something you can leave running. Keep that division: selection and
+        review logic belongs in <code>auto</code>, not in the loop.
+      </p>
+      <p>
+        The one change monitor mode forced on <code>auto</code> is
+        <code>run_auto(..., confirm_budget=False)</code>. The changed-file check is the only
+        interactive moment in that path; unattended, a batch over the limit is skipped and left for
+        a human rather than confirmed by default. <code>run_auto</code> also returns its per-PR
+        results now, which is what the loop reports on.
+      </p>
+      <p>
+        <strong>Each pass empties the comment cache first</strong>
+        (<code>github.forget_all_comments</code>). That cache is invalidated on a post and
+        otherwise lives for the process, which is right for a command that exits and wrong for one
+        that looks a hundred times: without clearing it, a comment left between two passes would
+        never be seen and a re-review would be written against a conversation that had moved on. If
+        you add long-running behaviour anywhere else, it needs the same treatment.
+      </p>
+      <p>
+        <strong>The knowledge base is refreshed when PRs merge</strong> while watching, via
+        <code>memory.merged_since_last_update</code>. That refresh passes
+        <code>with_graph=False</code> on purpose: the module map is the most expensive call PRaline
+        makes and codebase shape moves far more slowly than merged PRs, so redrawing it unattended
+        would spend most of the budget on the part that changed least.
+      </p>
+
+      <h3>The budget</h3>
+      <p>
+        <strong>A rolling window, enforced before a call, not after.</strong>
+        <code>budget.guard()</code> runs at the top of <code>claude_client.ask</code>, so an
+        exhausted allowance means a review never starts, rather than one being abandoned
+        half-posted. <code>auto</code> checks it once per PR and breaks out cleanly, leaving the
+        rest to requalify next run.
+      </p>
+      <p>
+        Two details that look like details and are not. <strong>Cached reads are excluded from the
+        count</strong> (<code>budget.billable</code>): a cached system prompt reports tens of
+        thousands of read tokens on a trivial call, at a fraction of the price, so counting them
+        would exhaust a sensible cap in four calls and describe nothing real. And
+        <strong>spending is persisted</strong> to <code>.praline/budget.json</code>: a monitor that
+        crashes and restarts must not receive a fresh allowance, which is exactly when a cap
+        matters. A stored window that no longer matches the requested one is discarded rather than
+        reinterpreted.
+      </p>
+      <p>
+        <code>DEFAULT_TOKENS_PER_HOUR</code> is 40,000, and monitor mode is the only mode that gets
+        a budget without being asked, because it is the only one that runs unattended for hours. The number
+        is measured, not guessed: one review of a small PR at depth 0 costs about 12.3k billable
+        tokens, so the default is roughly three an hour. If you change the default, re-measure
+        rather than reasoning about it; <code>--tokens-per-hour</code> takes an explicit
+        <code>0</code> to disable.
+      </p>
+      <p>
+        The active budget is module state (<code>budget.ACTIVE</code>) rather than a
+        <code>config.Run</code> field, because <code>claude_client.ask</code> is called from a dozen
+        places that have no business knowing about budgets. Default is <code>None</code>, and then
+        <code>guard()</code> and <code>record()</code> do nothing at all.
       </p>
 
       <h2 id="watching">What's new, and PR order</h2>
@@ -341,7 +470,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         acknowledging) and menu entry 4. Only those two write state
         (<code>mark_seen</code>); the interactive PR list reads it and never acknowledges, so the
         icons stay put until you say so. First run has nothing to compare against, so everything is
-        <code>NEW</code> exactly once — <code>is_first_look</code> keys off
+        <code>NEW</code> exactly once. <code>is_first_look</code> keys off
         <code>last_checked</code>, not the PR map, because a repo with no open PRs stores an empty one.</li>
         <li><strong>What order to review in.</strong> <code>order_prs</code> sorts by PR number
         ascending, except that a PR whose base branch is another open PR's head branch is a stack
@@ -369,7 +498,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         touch a file at all. Nothing here ever writes a token.</li>
         <li><strong>Who gets the message.</strong> <code>notify_review</code> posts to the PR author
         and the reviewer (<code>cfg.reviewer_login</code>, the GitHub login PRaline authenticated as).
-        Two recipients means <code>conversations.open</code> and a group DM — the reason
+        Two recipients means <code>conversations.open</code> and a group DM, which is the reason
         <code>mpim:write</code> is required; one means a direct <code>chat.postMessage</code> to the
         member ID, which needs no extra scope. Unmapped people are skipped, not fatal.</li>
         <li><strong>Resolution is cached.</strong> A mapping value may be a member ID, an
@@ -467,13 +596,34 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         it runs once. Timeout is <code>EXPLORE_TIMEOUT_S</code>, not the default.</li>
         <li><strong>Every later build: <code>build_repo_knowledge</code>.</strong> No tools. It
         looks up the default branch via the GitHub API, runs
-        <code>github.fetch_remote_branch</code> (<code>git fetch origin &lt;branch&gt;</code>,
-        quiet), and reads <code>git ls-tree</code> / <code>git log</code> off the resulting
-        <code>origin/&lt;branch&gt;</code> ref instead of <code>HEAD</code>, so a stale local
-        checkout cannot skew it. <code>git fetch</code> only updates
-        <code>refs/remotes/*</code>, never the working tree, the index, or local branches. If your
-        checkout was behind, a one-line note reports by how many commits.</li>
+        <code>github.fetch_remote_branch</code>, and reads <code>git ls-tree</code> /
+        <code>git log</code> off the resulting <code>origin/&lt;branch&gt;</code> ref instead of
+        <code>HEAD</code>, so a stale local checkout cannot skew it. <code>git fetch</code> only
+        updates <code>refs/remotes/*</code>, never the working tree, the index, or local branches.
+        If your checkout was behind, a one-line note reports by how many commits; if the fetch
+        failed outright, it says why and falls back to reading <code>HEAD</code>.</li>
       </ul>
+      <p>
+        Fetching goes through one function, <code>github.fetch_refs</code>, and it tries twice.
+        First <code>git fetch origin</code>, using whatever credentials the remote is configured
+        for. If that fails it retries over HTTPS with the GitHub token PRaline already requires.
+        That second attempt is not a nicety: the remote is usually ssh, and an ssh agent is the one
+        thing PRaline cannot assume is there: a tmux session outliving the agent that started it,
+        or a machine with no key loaded, used to leave every fetch dead behind a bare "could not
+        fetch origin/main" while a perfectly good token sat in the environment.
+      </p>
+      <p>
+        The token reaches git through the environment and is referenced <em>by name</em> in the
+        credential helper, so its value never appears in argv where <code>ps</code> would show it to
+        every user on the machine, and never lands in <code>.git/config</code>. An empty
+        <code>credential.helper=</code> is passed first to reset the helper list, so a system helper
+        configured elsewhere cannot answer ahead of it with the wrong account. Both attempts use the
+        same explicit refspecs, so what ends up in <code>refs/remotes/</code> does not depend on
+        which one won. Only a failure of both raises <code>FetchError</code>, carrying the first
+        line of git's own message, run through <code>redact_url</code>, since that message may
+        quote the remote.
+      </p>
+
       <p>
         Both markdown halves are fed into the review prompt on every review, which is the whole
         point: reviews get repo-specific over time.
@@ -495,6 +645,66 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         block the review the user actually asked for.
       </p>
 
+      <h2 id="module-map">The module map</h2>
+      <p>
+        <code>knowledge.html</code> ends with a "Repo at a glance" section: stat tiles over a
+        node-link diagram of the modules. Three pieces, deliberately separated.
+      </p>
+      <ol>
+        <li><strong>Getting it.</strong> <code>graph.build</code> runs one read-only Claude turn against the checkout with <code>prompts.ARCH_GRAPH_PROMPT</code>, which asks for <code>{nodes, edges}</code> and nothing else.</li>
+        <li><strong>Trusting none of it.</strong> <code>graph.normalize</code> drops what cannot be drawn: unknown node kinds fall back to <code>module</code>, duplicate ids, self-loops, repeated pairs, and any edge naming a node that was never declared. It never raises. A diagram missing two boxes is worth showing; a knowledge base that failed to build because the map came back malformed is not. <code>memory.build_graph</code> takes the same line one level up: on any failure it keeps the previous map and carries on.</li>
+        <li><strong>Drawing it.</strong> <code>render.py</code> emits the section and embeds the graph in a <code>&lt;script type="application/json"&gt;</code> block; the template's JavaScript lays it out. No CDN, no build step, so the page stays a single self-contained file you can publish as an artifact.</li>
+      </ol>
+      <p>
+        The layout is a layered DAG, not a force simulation, so the same graph always draws the
+        same picture. <strong>Cycles are broken before layering</strong>, with a depth-first walk
+        that marks the edges closing a cycle; those are excluded from the layer assignment and
+        rendered dashed. Skipping that step is not cosmetic: relaxing longest-path across a cycle
+        pushes its nodes a layer deeper on every pass, and four mutually-importing modules end up
+        strung across a canvas wide enough for thirteen.
+      </p>
+      <p>
+        The stat tiles are counted from git in <code>graph.stats</code>, never asked for. A number
+        a model wrote down is a number nobody can check. Tiles that come back zero are dropped, so
+        a shallow clone renders fewer tiles instead of a row of noughts.
+      </p>
+      <p>
+        Node <em>kind</em> is carried by shape and outline (a ring and <code>▸</code> for an entry
+        point, dashed for external), not by color alone, and a table view sits under the diagram.
+        If you restyle it, keep both: the theme's pastels are decorative and do not survive a
+        colorblind-separation check as a categorical encoding.
+      </p>
+
+      <h2 id="mcp">The MCP server</h2>
+      <p>
+        <code>praline-mcp</code> exposes the same operations as MCP tools, so Claude can drive
+        PRaline directly. It is an optional extra (<code>uv sync --extra mcp</code>); nothing else
+        in the package imports <code>mcp_server</code>, so the dependency stays optional in fact and
+        not only in the metadata.
+      </p>
+      <p>
+        Each tool resolves its repo the same way, through <code>_resolve</code>: the explicit
+        <code>repo_dir</code> argument, else <code>PRALINE_REPO_DIR</code>, else the process's
+        working directory, which is the repo you are in when Claude Code launches the server.
+      </p>
+      <p>Two constraints shape the module, and both are easy to break by accident:</p>
+      <ul>
+        <li>
+          <strong>Drafting and posting are separate tools.</strong> <code>review_pr_draft</code>
+          never writes to GitHub; it stashes the result in <code>_DRAFTS</code> and returns the
+          numbered draft. <code>post_review</code> posts the indices the user approved, out of that
+          stash rather than by re-running the review, which would come back subtly different. A
+          model that reads "review this PR" as "review and post it" therefore cannot post anything.
+        </li>
+        <li>
+          <strong>stdout belongs to the protocol.</strong> The rest of PRaline narrates as it works,
+          and on a stdio transport one stray <code>print</code> corrupts the JSON-RPC stream. Every
+          tool body runs inside <code>_captured()</code>, and <code>_reply()</code> hands the
+          captured text back as the result's <code>log</code> so the progress is not simply lost.
+          If you add a tool, wrap it the same way.
+        </li>
+      </ul>
+
       <h2 id="claude">The Claude backend</h2>
       <p><code>claude_client.ask()</code> is the only place PRaline talks to a model. It runs:</p>
 <pre><code>claude -p --output-format json --model &lt;model&gt; \
@@ -509,7 +719,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <li>The subprocess runs with <code>env=_clean_env()</code>: the current environment minus
         <code>GITHUB_TOKEN</code>, <code>GH_TOKEN</code>, <code>SLACK_BOT_TOKEN</code> and
         <code>PRALINE_SLACK_BOT_TOKEN</code>. The turn has no use for them, and a process that never
-        receives a secret cannot leak it — through a tool, a hook, an MCP server, or a diff written
+        receives a secret cannot leak it, whether through a tool, a hook, an MCP server, or a diff written
         to talk the model into echoing its environment. Add any new credential variable to that
         tuple the moment you introduce it.</li>
       </ul>
@@ -547,7 +757,11 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         userinfo part before that string can reach an error message. If you print a remote URL
         anywhere, print it through that function.</li>
         <li>Credentials are stripped from the review subprocess environment; see
-        <a href="#claude">The Claude backend</a>.</li>
+        <a href="#claude">The Claude backend</a>. The list in
+        <code>claude_client._CREDENTIAL_ENV_VARS</code> includes
+        <code>FETCH_TOKEN_ENV</code>, the variable <code>github.fetch_refs</code> passes the token
+        to git in. It is defined next to the strip list and imported from there, because naming it
+        in two places is how it ends up stripped in only one.</li>
         <li><code>cli._warn_if_praline_dir_committable</code> runs <code>git check-ignore</code> at
         start-up and warns when <code>.praline/</code> is not ignored in the target repo. That
         directory holds the knowledge base, the review log and possibly a Slack config.</li>
@@ -564,12 +778,15 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       <h2 id="invariants">Invariants</h2>
       <p>These are promises the README makes to users. A PR that breaks one will be rejected regardless of how useful the feature is.</p>
       <ul>
-        <li><strong>No write-to-code endpoints.</strong> Every function in <code>github.py</code> maps to a read endpoint, a comment endpoint, or the review-request endpoint. When adding a GitHub call, keep it inside the ALLOWED list documented at the top of that file — and note what is <em>not</em> there: approving, merging, and opening or editing issues.</li>
+        <li><strong>No write-to-code endpoints.</strong> Every function in <code>github.py</code> maps to a read endpoint, a comment endpoint, or the review-request endpoint. When adding a GitHub call, keep it inside the ALLOWED list documented at the top of that file, and note what is <em>not</em> there: approving, merging, and opening or editing issues.</li>
         <li><strong>No auto-posting outside <code>praline auto</code>.</strong> The interactive menu's comments flow through <code>run_approval_loop</code> and the final confirmation; nothing in <code>cli._do_review</code> may skip them. <code>auto.run_auto</code> is the one deliberate exception, gated behind its own subcommand.</li>
         <li><strong>No API key.</strong> The model backend stays the <code>claude</code> CLI. Do not introduce <code>anthropic</code> SDK calls or key handling.</li>
         <li><strong>No tools beyond read-only, and never without the denylist.</strong> The codebase scan and huge-PR explore mode are the only tool-enabled calls. If you add another, pass <code>READ_ONLY_TOOLS</code> and <code>SECRET_DENY_RULES</code> together; a write or shell tool would break the "never touches code" promise outright.</li>
         <li><strong>Credentials never reach a subprocess or a log line.</strong> Tokens are read from the environment at the point of use, sent only to their own API host, and stripped from the <code>claude</code> child environment. Nothing writes one to disk, and no error message may interpolate one.</li>
         <li><strong>Slack only ever sends, and only to people.</strong> The four methods called are <code>auth.test</code>, a user lookup, <code>conversations.open</code> and <code>chat.postMessage</code> to a DM or group DM. No channels, no history reads, and a Slack failure never rolls back or blocks a review.</li>
+        <li><strong>Nothing posts from the MCP server without a second call.</strong> <code>review_pr_draft</code> drafts and returns; <code>post_review</code> publishes what the user picked. Any new tool that writes to GitHub stays separate from the tool that produces the content, for the same reason the interactive loop exists.</li>
+        <li><strong>Every review is grounded in the accumulated knowledge.</strong> <code>reviewer._build_review_prompt</code> is the single place that appends <code>repo.md</code>, <code>pr_history.md</code> and the review log, and every review path goes through it, including huge-PR explore mode, depth 3, and the MCP tool. A new path that assembles a prompt some other way silently loses the repo-specific half of the review. The module map is deliberately not in there; it is for the HTML page.</li>
+        <li><strong>Unattended modes stay capped and non-draft.</strong> Monitor mode gets a token budget whether or not one was asked for, and drafts never qualify for an automatic review. Both are what makes leaving it running defensible.</li>
         <li><strong>The review reply is JSON with a fixed schema.</strong> The schema lives in <code>prompts.DEFAULT_REVIEW_PROMPT</code> and its consumers are <code>run_approval_loop</code> and <code>post_accepted_comments</code>. Change all of them together, and remember users can supply custom prompt files that must still produce the same schema.</li>
       </ul>
 
@@ -585,9 +802,13 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <tr><td>Change the approval UX</td><td><code>reviewer.run_approval_loop</code>, <code>_display_comment</code>, <code>_prompt_action</code>.</td></tr>
         <tr><td>Change knowledge-base content</td><td><code>prompts.INIT_CODEBASE_PROMPT</code> (first build), <code>INIT_REPO_PROMPT</code> (updates) or <code>INIT_PR_HISTORY_PROMPT</code>; the surrounding pipeline is <code>memory.py</code>.</td></tr>
         <tr><td>Change how the knowledge base reads</td><td><code>prompts.KB_STYLE</code>. It is appended to all three knowledge-base prompts, so the rules stay in one place.</td></tr>
-        <tr><td>Restyle the knowledge-base page</td><td><code>praline/templates/knowledge.html</code>. No Python involved.</td></tr>
+        <tr><td>Restyle the knowledge-base page</td><td><code>praline/templates/knowledge.html</code> for the shell and the map's JavaScript, <code>render.py</code> for the fragments Python builds.</td></tr>
+        <tr><td>Add or change a review depth</td><td><code>hardness.LEVELS</code>, and nothing else. The CLI help, the menu, the MCP tool description and <code>clamp()</code> all read the dict.</td></tr>
+        <tr><td>Change what the module map shows</td><td><code>prompts.ARCH_GRAPH_PROMPT</code> for what Claude is asked, <code>graph.normalize</code> for what survives, the template's script for how it draws.</td></tr>
+        <tr><td>Add an MCP tool</td><td><code>mcp_server.py</code>: a <code>@server.tool()</code> function wrapping its body in <code>_captured()</code> and returning <code>_reply(...)</code>. Keep anything that writes to GitHub behind its own explicit tool.</td></tr>
         <tr><td>Add a stored file under <code>.praline/</code></td><td><code>config.py</code> for the path and load/save helpers, then use them from wherever needs it.</td></tr>
-        <tr><td>Change auto-mode selection or posting</td><td><code>auto.select_prs</code> for which PRs qualify, <code>auto.run_auto</code> for the review/post/summary loop.</td></tr>
+        <tr><td>Change auto-mode selection or posting</td><td><code>auto.select_prs</code> for which PRs qualify, <code>auto.run_auto</code> for the review/post/summary loop. Monitor mode inherits both.</td></tr>
+        <tr><td>Change what monitor mode does per pass</td><td><code>monitor.run_monitor</code> for the loop, <code>monitor._report</code> for what a pass prints. Anything about <em>which</em> PRs qualify belongs in <code>auto</code>.</td></tr>
         <tr><td>Change the review order or the new/updated icons</td><td><code>watch.order_prs</code> and <code>watch.classify</code>. Both modes read them, so a change lands everywhere at once.</td></tr>
         <tr><td>Change a Slack message</td><td><code>slack.review_message</code> (per PR) or <code>slack.digest_message</code> (the round-up). Delivery is <code>notify_review</code> / <code>notify_digest</code>; keep failures non-fatal.</td></tr>
         <tr><td>Add or change a verdict</td><td><code>verdict.STATUS_LABEL</code> and <code>verdict.status_key</code>, plus the status guide in <code>prompts.DEFAULT_REVIEW_PROMPT</code>. The three renderers (CLI, auto summary, Slack) all read the same helpers.</td></tr>
@@ -597,6 +818,9 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
 
       <h2 id="gotchas">Gotchas</h2>
       <ul>
+        <li><strong>A model reply that should be JSON goes through <code>claude_client.extract_json</code>.</strong> It tolerates a fenced block or prose either side of the object, and it is shared by the review parser and the module-map parser. Do not write a third one.</li>
+        <li><strong>The module map is laid out from a cycle-free graph.</strong> <code>graph.normalize</code> removes self-loops but not cycles; the template breaks those at layout time. If you rewrite the layering, keep the depth-first cycle break or a mutually-importing package will draw itself across a canvas ten times too wide.</li>
+        <li><strong>A suggestion block must not be re-wrapped.</strong> Its indentation is what GitHub commits, so <code>_display_comment</code> prints those bodies verbatim. Any new renderer of comment bodies has to do the same.</li>
         <li><strong>Resolving review threads is GraphQL-only.</strong> GitHub's REST API cannot mark a conversation resolved, so <code>github.py</code> carries two small GraphQL calls (<code>find_review_thread_id</code>, <code>resolve_review_thread</code>). Everything else is REST.</li>
         <li><strong><code>reply_to_id</code> must be the thread's root comment.</strong> Replying to a reply detaches the comment from its thread. The prompt instructs the model accordingly; keep that instruction if you rewrite it.</li>
         <li><strong><code>get_merged_prs</code> paginates by <code>updated</code>, not <code>merged_at</code>.</strong> The early-exit condition is deliberately conservative (a whole page must be older than the cutoff) and there is a hard cap of 10 pages. Easy to break if you "simplify" it.</li>
@@ -605,9 +829,9 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <li><strong>The HTML template uses <code>safe_substitute</code>, not <code>substitute</code>.</strong> It contains literal <code>$</code> characters in its prose, which <code>substitute</code> would reject as bad placeholders. Keep the placeholders (<code>$title</code>, <code>$repo</code>, <code>$toc</code>, <code>$body</code>) distinctive if you edit it.</li>
         <li><strong>The knowledge files live in the reviewed repo.</strong> Consider suggesting <code>.praline/</code> for that repo's <code>.gitignore</code>; PRaline itself never commits anything, so it cannot do this for the user.</li>
         <li><strong><code>get_repo_structure</code> / <code>get_recent_commits</code> take an explicit ref.</strong> They read <code>git ls-tree</code> / <code>git log &lt;ref&gt;</code>, not the working tree or <code>HEAD</code>. Callers outside <code>build_repo_knowledge</code> must still pass a ref (e.g. <code>"HEAD"</code>) if they want the local checkout.</li>
-        <li><strong>Subparser defaults must be <code>SUPPRESS</code>.</strong> <code>_add_common_args</code> is called on the top-level parser and on every subparser so <code>--dir</code> works on either side of the subcommand. argparse applies a subparser's defaults <em>after</em> the top-level parse, so a real default on the subparser silently overwrites what the user passed before the subcommand — which is why <code>_add_common_args(..., subcommand=True)</code> swaps every default for <code>argparse.SUPPRESS</code>. Add a new shared flag through that function, never directly to a subparser.</li>
+        <li><strong>Subparser defaults must be <code>SUPPRESS</code>.</strong> <code>_add_common_args</code> is called on the top-level parser and on every subparser so <code>--dir</code> works on either side of the subcommand. argparse applies a subparser's defaults <em>after</em> the top-level parse, so a real default on the subparser silently overwrites what the user passed before the subcommand, which is why <code>_add_common_args(..., subcommand=True)</code> swaps every default for <code>argparse.SUPPRESS</code>. Add a new shared flag through that function, never directly to a subparser.</li>
         <li><strong>Comment lists are cached per run.</strong> <code>github._COMMENT_CACHE</code> makes the three readers of a PR's comments (status line, prompt conversation, reply lookup) cost one fetch each instead of three. Every posting function calls <code>forget_pr_comments</code>; if you add another write path, call it too or the next read will be stale.</li>
-        <li><strong>Line comments take the head sha from the caller.</strong> <code>post_pr_review_comment</code> no longer refetches the PR per comment — pass <code>pr.head_sha</code>, which also pins the comment to the commit that was actually reviewed.</li>
+        <li><strong>Line comments take the head sha from the caller.</strong> <code>post_pr_review_comment</code> no longer refetches the PR per comment. Pass <code>pr.head_sha</code>, which also pins the comment to the commit that was actually reviewed.</li>
         <li><strong>You cannot request a review from the PR author.</strong> GitHub answers 422, so <code>rerequest_review</code> skips your own PRs. Anything else it fails on is printed and ignored.</li>
         <li><strong><code>PRInfo</code> counts are only populated on single-PR fetches.</strong> The list endpoint omits <code>additions</code>/<code>deletions</code>/<code>changed_files</code>, so those default to 0 until <code>get_pr</code> is called; that is why <code>get_pr_status</code> and <code>auto.run_auto</code> both refetch. <code>draft</code> and <code>updated_at</code>, by contrast, are present on the list endpoint already.</li>
       </ul>

@@ -8,7 +8,7 @@ total changed-file count crosses --max-changed-files.
 
 from pathlib import Path
 
-from . import config, watch
+from . import budget, config, hardness, watch
 from .github import (
     PRInfo,
     get_pr,
@@ -69,25 +69,39 @@ def select_prs(repo: str, repo_dir: Path, explicit: list[int]) -> tuple[list[PRI
     return watch.order_prs(selected), []
 
 
-def _confirm_budget(candidates: list[PRInfo], max_changed_files: int) -> bool:
-    total_files = sum(pr.changed_files for pr in candidates)
+def _preview(candidates: list[PRInfo], level: int) -> None:
+    """What is about to be reviewed, and in what order."""
     print(f"\n{_rule()}")
     print(_c("Review order: oldest first, stacked PRs after the PR they build on.", DIM))
     for pr in candidates:
         tag = _c(f"({pr.changed_files} files)", DIM)
         print(f"  {_c(f'#{pr.number:<4}', MAGENTA)} {pr.title}  {tag}")
     print(_rule())
-    print(f"Total files changed across {len(candidates)} PR(s): {total_files}")
+    total = sum(pr.changed_files for pr in candidates)
+    print(f"Total files changed across {len(candidates)} PR(s): {total}")
+    print(f"Review depth: {hardness.label(level)}")
 
-    if total_files <= max_changed_files:
+
+def _within_file_limit(
+    candidates: list[PRInfo], max_changed_files: int, interactive: bool
+) -> bool:
+    """Whether this batch is small enough to review.
+
+    Over the limit, an interactive run asks; an unattended one declines, so a
+    huge batch waits for a human instead of being reviewed by default."""
+    total = sum(pr.changed_files for pr in candidates)
+    if total <= max_changed_files:
         return True
     print(
         _c(
-            f"\nThis exceeds the configured limit of {max_changed_files} files "
+            f"\n{total} changed files exceeds the configured limit of {max_changed_files} "
             "(--max-changed-files).",
             YELLOW,
         )
     )
+    if not interactive:
+        print(_c("Nobody to ask, so leaving these for a human.", DIM))
+        return False
     return confirm("Continue anyway?", default_yes=False)
 
 
@@ -111,23 +125,38 @@ def _print_summary(results: list[dict]) -> None:
     print(_rule("═"))
 
 
-def run_auto(run: config.Run, pr_numbers: list[int], max_changed_files: int) -> None:
+def run_auto(
+    run: config.Run,
+    pr_numbers: list[int],
+    max_changed_files: int,
+    attended: bool = True,
+) -> list[dict]:
+    """Review every qualifying PR and post the comments. Returns the per-PR
+    results.
+
+    `attended` says whether a person is reading. It gates the two things that
+    only make sense for someone watching one run: the confirmation when a batch
+    is over the file limit, and the scan/summary chatter. Monitor mode passes
+    False and prints its own per-pass digest instead."""
     repo_dir, repo = run.repo_dir, run.repo
-    print(_c("Scanning for PRs to auto-review...", DIM))
+    if attended:
+        print(_c("Scanning for PRs to auto-review...", DIM))
     candidates, missing = select_prs(repo, repo_dir, pr_numbers)
     for n in missing:
         print(_c(f"  PR #{n} is not open, skipping.", YELLOW))
     if not candidates:
-        print(_c("Nothing to review.", GREEN))
-        return
+        if attended:
+            print(_c("Nothing to review.", GREEN))
+        return []
 
     # The list endpoint omits changed_files/additions/deletions; refetch per PR,
     # keeping the review order select_prs settled on.
     candidates = [get_pr(repo, pr.number) for pr in candidates]
 
-    if not _confirm_budget(candidates, max_changed_files):
-        print(_c("Aborted. Nothing reviewed.", DIM))
-        return
+    if attended:
+        _preview(candidates, run.hardness)
+    if not _within_file_limit(candidates, max_changed_files, attended):
+        return []
 
     state = config.load_auto_state(repo_dir)
     results = []
@@ -135,8 +164,21 @@ def run_auto(run: config.Run, pr_numbers: list[int], max_changed_files: int) -> 
     for pr in candidates:
         print(f"\n{_c(f'Reviewing #{pr.number}', BOLD)}: {pr.title}")
         try:
+            budget.guard()
+        except budget.BudgetExceeded as e:
+            print(_c(f"  {e}", YELLOW))
+            print(_c("  Stopping here; the PRs left keep their state and requalify next run.", DIM))
+            break
+
+        try:
             review = review_pr(
-                repo_dir, repo, pr, model=run.model, custom_prompt=None, interactive=False
+                repo_dir,
+                repo,
+                pr,
+                model=run.model,
+                custom_prompt=None,
+                interactive=False,
+                level=run.hardness,
             )
         except Exception as e:
             print(_c(f"  Review failed: {e}", RED))
@@ -173,4 +215,6 @@ def run_auto(run: config.Run, pr_numbers: list[int], max_changed_files: int) -> 
 
     config.save_auto_state(repo_dir, state)
     notify_digest(run.slack, repo, reviewed)
-    _print_summary(results)
+    if attended:
+        _print_summary(results)
+    return results

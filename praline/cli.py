@@ -13,10 +13,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import config, slack, watch
+from . import budget, config, hardness, slack, watch
 from .auto import run_auto
 from .github import check_auth, infer_repo_slug, is_git_ignored, list_open_prs
-from .memory import last_updated_at, merged_since_last_update, update_knowledge
+from .memory import (
+    last_updated_at,
+    merged_since_last_update,
+    update_knowledge,
+    warn_if_no_knowledge,
+)
+from .monitor import DEFAULT_INTERVAL_S, DEFAULT_TOKENS_PER_HOUR, run_monitor
 from .reviewer import (
     build_comment_lookup,
     get_pr_status,
@@ -127,7 +133,7 @@ def _show_pr_status(repo: str, pr) -> None:
 
 def _do_view_knowledge(repo_dir: Path) -> None:
     if not config.knowledge_exists(repo_dir):
-        print(_c("No knowledge base found yet — build it first.", YELLOW))
+        print(_c("No knowledge base found yet. Build it first.", YELLOW))
         return
     print(f"\n{_rule('═')}")
     print(_c("REPO KNOWLEDGE", BOLD))
@@ -199,7 +205,7 @@ def _do_review(run: config.Run, session: list) -> None:
     the Slack round-up is built from when you quit."""
     repo_dir, repo, model = run.repo_dir, run.repo, run.model
     if not config.knowledge_exists(repo_dir):
-        print(_c("No knowledge base found yet — reviews will be less informed.", YELLOW))
+        print(_c("No knowledge base found yet, so reviews will be less informed.", YELLOW))
         if confirm("Build it now?"):
             _do_init_or_update(repo_dir, repo, model)
     else:
@@ -207,12 +213,12 @@ def _do_review(run: config.Run, session: list) -> None:
 
     prs = list_open_prs(repo)
     if not prs:
-        print(_c("No open PRs found. Nothing to review — enjoy the quiet.", GREEN))
+        print(_c("No open PRs found. Nothing to review, enjoy the quiet.", GREEN))
         return
 
     if len(prs) == 1:
         pr = prs[0]
-        print(f"Only one open PR — reviewing #{pr.number}: {pr.title}")
+        print(f"Only one open PR, reviewing #{pr.number}: {pr.title}")
     else:
         pr = _pick_pr(repo_dir, prs)
         if pr is None:
@@ -227,11 +233,16 @@ def _do_review(run: config.Run, session: list) -> None:
         if p.exists():
             custom_prompt = p.read_text()
         else:
-            print(_c(f"  Not found: {raw_path} — using default prompt.", YELLOW))
+            print(_c(f"  Not found: {raw_path}, using the default prompt.", YELLOW))
 
-    print(f"\n{MASCOT} Reviewing PR #{pr.number} with {model}, one moment...")
+    print(
+        f"\n{MASCOT} Reviewing PR #{pr.number} with {model} "
+        f"at depth {hardness.label(run.hardness)}, one moment..."
+    )
     try:
-        review = review_pr(repo_dir, repo, pr, model=model, custom_prompt=custom_prompt)
+        review = review_pr(
+            repo_dir, repo, pr, model=model, custom_prompt=custom_prompt, level=run.hardness
+        )
     except Exception as e:
         print(_c(f"Review failed: {e}", RED))
         return
@@ -257,6 +268,23 @@ def _do_review(run: config.Run, session: list) -> None:
         slack.notify_review(run.slack, repo, pr, accepted, review)
 
 
+def _ask_hardness(run: config.Run) -> None:
+    """Change how hard reviews look, for the rest of this sitting."""
+    print(f"\n{_c('Review depth', BOLD)}")
+    for level in hardness.LEVELS.values():
+        marker = _c(" ← current", GREEN) if level.value == run.hardness else ""
+        print(f"  [{level.value}] {_c(level.name, CYAN)}: {level.blurb}{marker}")
+    raw = input(_c(f"\nDepth [{run.hardness}]: ", CYAN)).strip()
+    if not raw:
+        return
+    try:
+        run.hardness = hardness.clamp(int(raw))
+    except ValueError:
+        print(_c("  Not a number, leaving it as it was.", YELLOW))
+        return
+    print(_c(f"  Depth set to {hardness.label(run.hardness)}.", GREEN))
+
+
 def _main_menu(run: config.Run) -> None:
     repo_dir, repo, model = run.repo_dir, run.repo, run.model
     session: list[dict] = []  # PRs reviewed in this sitting, for the Slack round-up
@@ -274,6 +302,7 @@ def _main_menu(run: config.Run) -> None:
                 else _c("not built yet", YELLOW)
             )
         )
+        print(f"  review depth: {_c(hardness.label(run.hardness), CYAN)}")
         print()
         print("  [1] 🔍 Review a PR")
         print(
@@ -283,6 +312,7 @@ def _main_menu(run: config.Run) -> None:
         )
         print("  [3] 📖 View knowledge base")
         print("  [4] 🆕 What's new since last time")
+        print("  [5] 🎚  Change review depth")
         print("  [q] 👋 Quit")
         choice = input(_c("\n> ", CYAN)).strip().lower()
 
@@ -294,6 +324,8 @@ def _main_menu(run: config.Run) -> None:
             _do_view_knowledge(repo_dir)
         elif choice in ("4", "check", "new"):
             watch.run_check(repo_dir, repo, mark=None)
+        elif choice in ("5", "depth", "hardness"):
+            _ask_hardness(run)
         elif choice in ("q", "quit", "exit"):
             slack.notify_digest(run.slack, repo, session)
             print(f"\n{MASCOT} Bye!")
@@ -341,6 +373,25 @@ def _add_common_args(parser: argparse.ArgumentParser, subcommand: bool = False) 
         help="Notify PR authors on Slack once their PR has been reviewed. Needs a bot "
         "token and a github->slack user mapping (~/.config/praline/slack.json)",
     )
+    parser.add_argument(
+        "--tokens-per-hour",
+        type=int,
+        default=default(None),
+        metavar="N",
+        help="Cap model spending at N tokens per rolling hour, counted across restarts "
+        f"(0 = no cap). Monitor mode defaults to {DEFAULT_TOKENS_PER_HOUR:,}; every other "
+        "mode is uncapped unless you pass this. Counts fresh input + cache writes + "
+        "output, not cached reads",
+    )
+    parser.add_argument(
+        "--hardness",
+        "-H",
+        type=int,
+        default=default(hardness.DEFAULT),
+        metavar="N",
+        help=f"How hard to look at the diff: {hardness.choices_help()} "
+        f"(default: {hardness.DEFAULT})",
+    )
 
 
 def main():
@@ -369,6 +420,36 @@ def main():
         default=config.DEFAULT_MAX_CHANGED_FILES,
         help=f"Prompt for confirmation above this total changed-file count across all "
         f"selected PRs (default: {config.DEFAULT_MAX_CHANGED_FILES})",
+    )
+
+    monitor_parser = subparsers.add_parser(
+        "monitor",
+        help="Keep watching: review PRs as they are opened or updated, unattended",
+    )
+    _add_common_args(monitor_parser, subcommand=True)
+    monitor_parser.add_argument(
+        "--interval",
+        type=int,
+        default=DEFAULT_INTERVAL_S,
+        metavar="SECONDS",
+        help=f"How long to wait between looks (default: {DEFAULT_INTERVAL_S})",
+    )
+    monitor_parser.add_argument(
+        "--max-changed-files",
+        type=int,
+        default=config.DEFAULT_MAX_CHANGED_FILES,
+        help=f"Skip a batch of PRs larger than this, leaving them for a human "
+        f"(default: {config.DEFAULT_MAX_CHANGED_FILES})",
+    )
+    monitor_parser.add_argument(
+        "--no-knowledge-refresh",
+        action="store_true",
+        help="Don't rebuild the knowledge base when PRs are merged while watching",
+    )
+    monitor_parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Do a single pass and exit, rather than looping",
     )
 
     check_parser = subparsers.add_parser(
@@ -419,10 +500,36 @@ def main():
         reviewer_login=username,
         request_review=not args.no_request_review,
         slack=_load_slack(repo_dir, args.slack, username),
+        hardness=hardness.clamp(args.hardness),
     )
+
+    # Unset means "no cap", except in monitor mode, which is the one that runs
+    # unattended for hours and so is the one that must not be uncapped by
+    # default. An explicit 0 turns it off anywhere.
+    tokens_per_hour = args.tokens_per_hour
+    if tokens_per_hour is None:
+        tokens_per_hour = DEFAULT_TOKENS_PER_HOUR if args.command == "monitor" else 0
+    if tokens_per_hour > 0:
+        budget.activate(
+            budget.Budget.load(config.budget_file(repo_dir), limit=tokens_per_hour)
+        )
+        print(f"{MASCOT} Budget: {_c(budget.ACTIVE.summary(), CYAN)}")
+
+    # Both unattended modes review whatever they are pointed at; the interactive
+    # menu offers to build instead, so it does not need this.
+    if args.command in ("auto", "monitor"):
+        warn_if_no_knowledge(repo_dir)
 
     if args.command == "auto":
         run_auto(run, pr_numbers=args.pr_numbers, max_changed_files=args.max_changed_files)
+    elif args.command == "monitor":
+        run_monitor(
+            run,
+            interval_s=args.interval,
+            max_changed_files=args.max_changed_files,
+            refresh_knowledge=not args.no_knowledge_refresh,
+            once=args.once,
+        )
     else:
         _main_menu(run)
 

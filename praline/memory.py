@@ -1,16 +1,16 @@
-"""Build and update the local knowledge base: two markdown halves, one combined
-markdown document, and an HTML rendering of it."""
+"""Build and update the local knowledge base: what the repo does, what its
+merged PRs taught, and the module map. Rendering to documents lives in
+`render`; this module only decides what they say."""
 
 import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from string import Template
 
-import markdown
-
-from . import claude_client, config, prompts
+from . import claude_client, config, prompts, render
+from . import graph as graph_mod
 from .github import (
+    FetchError,
     fetch_remote_branch,
     get_default_branch,
     get_merged_prs,
@@ -23,10 +23,6 @@ from .github import (
 # If an "update" pass comes back shorter than this fraction of the previous
 # document, treat it as erasure rather than editing and keep the old version.
 _MIN_KEPT_FRACTION = 0.5
-
-_HTML_TEMPLATE = Path(__file__).parent / "templates" / "knowledge.html"
-
-_EMPTY_TOC = '<div class="toc">\n<ul></ul>\n</div>'
 
 
 def _linkify_pr_refs(text: str, repo: str) -> str:
@@ -48,7 +44,7 @@ def _guard_against_erasure(previous: str, new: str, label: str) -> str:
     if len(new.strip()) < _MIN_KEPT_FRACTION * len(previous.strip()):
         print(
             f"  ⚠ new {label} is much shorter than the existing one "
-            f"({len(new.strip())} vs {len(previous.strip())} chars) — "
+            f"({len(new.strip())} vs {len(previous.strip())} chars), "
             "keeping the existing version instead of overwriting it."
         )
         return previous
@@ -64,31 +60,6 @@ def _strip_preamble(doc: str) -> str:
 def _backup(path: Path) -> None:
     if path.exists():
         shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
-
-
-def _knowledge_body(repo_knowledge: str, pr_history: str) -> str:
-    """The two documents stitched into one, with PR history demoted a level."""
-    pr_history_nested = re.sub(r"(?m)^## ", "### ", pr_history)
-    return f"{repo_knowledge}\n\n---\n\n## PR history and lessons\n\n{pr_history_nested}"
-
-
-def render_knowledge_md(repo: str, repo_knowledge: str, pr_history: str) -> str:
-    return f"# {repo} knowledge base\n\n{_knowledge_body(repo_knowledge, pr_history)}"
-
-
-def render_knowledge_html(repo: str, repo_knowledge: str, pr_history: str) -> str:
-    md = markdown.Markdown(
-        extensions=["fenced_code", "tables", "toc"],
-        extension_configs={"toc": {"anchorlink": False, "permalink": False}},
-    )
-    body = md.convert(_knowledge_body(repo_knowledge, pr_history))
-    # safe_substitute, not substitute: the template has literal `$` in its prose.
-    return Template(_HTML_TEMPLATE.read_text()).safe_substitute(
-        title=f"{repo} — knowledge base",
-        repo=repo,
-        body=body,
-        toc="" if md.toc.strip() == _EMPTY_TOC else md.toc,
-    )
 
 
 def scan_codebase(repo_dir: Path, model: str) -> str:
@@ -110,18 +81,19 @@ def scan_codebase(repo_dir: Path, model: str) -> str:
 
 def build_repo_knowledge(repo_dir: Path, repo: str, model: str) -> str:
     default_branch = get_default_branch(repo)
-    ref = fetch_remote_branch(repo_dir, default_branch)
-    if ref is None:
+    try:
+        ref = fetch_remote_branch(repo_dir, repo, default_branch)
+        if behind := local_commits_behind(repo_dir, ref):
+            print(
+                f"  note: local checkout is {behind} commit(s) behind {ref}; "
+                f"reading {ref} from GitHub instead of your working tree."
+            )
+    except FetchError as e:
         print(
-            f"  note: could not fetch origin/{default_branch}; "
+            f"  note: could not fetch origin/{default_branch} ({e}); "
             "reading your local checkout instead."
         )
         ref = "HEAD"
-    elif behind := local_commits_behind(repo_dir, ref):
-        print(
-            f"  note: local checkout is {behind} commit(s) behind {ref}; "
-            f"reading {ref} from GitHub instead of your working tree."
-        )
 
     structure = get_repo_structure(repo_dir, ref)
     commits = get_recent_commits(repo_dir, ref, 50)
@@ -162,6 +134,25 @@ def build_pr_history(repo: str, repo_dir: Path, since_days: int, model: str) -> 
     return _linkify_pr_refs(_strip_preamble(raw), repo)
 
 
+def warn_if_no_knowledge(repo_dir: Path) -> bool:
+    """Say so when a repo has no knowledge base yet. Returns whether it warned.
+
+    The unattended modes review whatever they are pointed at, so without this a
+    repo that was never set up gets reviewed against the bare prompt — a real
+    drop in quality, and silent. They deliberately do not build one instead: a
+    first build reads the whole codebase, which is the most expensive call
+    PRaline makes and not something to start on its own behalf while nobody is
+    watching."""
+    if config.knowledge_exists(repo_dir):
+        return False
+    print(
+        "⚠ No knowledge base for this repo, so reviews have no architecture, conventions "
+        "or past PR lessons to go on."
+    )
+    print(f"  Build it first (a few minutes, once):  praline --dir {repo_dir}  then pick [2]")
+    return True
+
+
 def last_updated_at(repo_dir: Path) -> datetime | None:
     """When the knowledge base was last built, or None if it never was."""
     raw = config.load_knowledge_state(repo_dir).get("updated_at")
@@ -180,8 +171,31 @@ def merged_since_last_update(repo: str, repo_dir: Path) -> list[dict]:
     return get_merged_prs_since(repo, since) if since else []
 
 
+def build_graph(repo_dir: Path, model: str) -> dict:
+    """The module map for the HTML page, falling back to the previous one.
+
+    The diagram is the one part of the knowledge base that is decoration: if
+    Claude comes back with something unusable, the documents are still worth
+    writing, so this never raises."""
+    previous = config.load_graph(repo_dir)
+    try:
+        graph = graph_mod.build(repo_dir, model)
+    except Exception as e:
+        print(f"  ⚠ could not draw the module map: {e}")
+        return previous
+    if not graph["nodes"]:
+        print("  ⚠ the module map came back empty; keeping the previous one.")
+        return previous
+    config.save_graph(repo_dir, graph)
+    return graph
+
+
 def update_knowledge(
-    repo_dir: Path, repo: str, model: str, since_days: int = config.DEFAULT_SINCE_DAYS
+    repo_dir: Path,
+    repo: str,
+    model: str,
+    since_days: int = config.DEFAULT_SINCE_DAYS,
+    with_graph: bool = True,
 ) -> tuple[Path, Path]:
     """Rebuild both documents and write them out. Returns (markdown, html) paths."""
     previous_repo_knowledge = config.load_repo_knowledge(repo_dir)
@@ -208,7 +222,18 @@ def update_knowledge(
     config.save_pr_history(repo_dir, pr_history)
     print(f"  Saved to {config.pr_history_file(repo_dir)}")
 
-    config.save_knowledge_md(repo_dir, render_knowledge_md(repo, repo_knowledge, pr_history))
-    config.save_knowledge_html(repo_dir, render_knowledge_html(repo, repo_knowledge, pr_history))
+    if with_graph:
+        print("Drawing the module map...")
+        graph = build_graph(repo_dir, model)
+    else:
+        graph = config.load_graph(repo_dir)
+
+    config.save_knowledge_md(repo_dir, render.knowledge_md(repo, repo_knowledge, pr_history))
+    config.save_knowledge_html(
+        repo_dir,
+        render.knowledge_html(
+            repo, repo_knowledge, pr_history, graph, graph_mod.stats(repo_dir, graph)
+        ),
+    )
     config.save_knowledge_state(repo_dir, {"updated_at": config.now_iso()})
     return config.knowledge_md_file(repo_dir), config.knowledge_html_file(repo_dir)

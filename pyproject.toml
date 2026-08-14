@@ -8,8 +8,14 @@ dependencies = [
     "markdown>=3.6",
 ]
 
+[project.optional-dependencies]
+# The MCP server is the only thing that needs this, and it is not needed to
+# review a PR from the terminal.
+mcp = ["mcp>=1.2"]
+
 [project.scripts]
 praline = "praline.cli:main"
+praline-mcp = "praline.mcp_server:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -22,6 +28,7 @@ line-length = 100
 select = ["E", "F", "I"]
 
 [tool.ruff.lint.per-file-ignores]
-# prompts.py is prose addressed to a model, not code. Wrapping it to the code
-# line length would only make the prompts harder to read and edit.
+# Both files are mostly prose addressed to a model, not code. Wrapping them to
+# the code line length would only make the prompts harder to read and edit.
 "praline/prompts.py" = ["E501"]
+"praline/hardness.py" = ["E501"]

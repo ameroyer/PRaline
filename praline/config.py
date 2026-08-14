@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import hardness
+
 DEFAULT_MODEL = "sonnet"
 DEFAULT_MAX_CHANGED_FILES = 500
 DEFAULT_SINCE_DAYS = 30
@@ -27,6 +29,7 @@ class Run:
     reviewer_login: str = ""
     request_review: bool = True
     slack: Any = None
+    hardness: int = hardness.DEFAULT
 
 
 def now_iso() -> str:
@@ -58,8 +61,16 @@ def knowledge_state_file(repo_dir: Path) -> Path:
     return knowledge_dir(repo_dir) / "knowledge_state.json"
 
 
+def graph_file(repo_dir: Path) -> Path:
+    return knowledge_dir(repo_dir) / "graph.json"
+
+
 def artifact_url_file(repo_dir: Path) -> Path:
     return knowledge_dir(repo_dir) / "artifact_url.txt"
+
+
+def budget_file(repo_dir: Path) -> Path:
+    return knowledge_dir(repo_dir) / "budget.json"
 
 
 def auto_state_file(repo_dir: Path) -> Path:
@@ -117,6 +128,16 @@ def save_knowledge_md(repo_dir: Path, content: str) -> None:
 
 def save_knowledge_html(repo_dir: Path, html: str) -> None:
     _write(knowledge_html_file(repo_dir), html)
+
+
+def load_graph(repo_dir: Path) -> dict:
+    """The module map drawn in the HTML knowledge base: {"nodes": [], "edges": []}."""
+    data = _read_json(graph_file(repo_dir))
+    return data if data.get("nodes") else {"nodes": [], "edges": []}
+
+
+def save_graph(repo_dir: Path, graph: dict) -> None:
+    _write_json(graph_file(repo_dir), graph)
 
 
 def load_knowledge_state(repo_dir: Path) -> dict:

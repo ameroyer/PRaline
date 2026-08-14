@@ -51,6 +51,7 @@ preamble, no explanation, no markdown fence around it:
     {
       "file": "<path/to/file.py or null for general>",
       "line": <line number in the diff, or null>,
+      "start_line": <first line of the range, when the comment covers several lines; omit or null for a single line>,
       "severity": "<bug|warning|nit>",
       "body": "<the comment text, ready to post verbatim on GitHub>"
     }
@@ -85,6 +86,41 @@ Comment style — apply MINIMALISM to your own prose, not just the code:
 - "summary" follows the same rule: 1-3 sentences, written as a PR comment a human would actually post, not a report.
 
 One comment per issue. If the code is good, say so tersely in the summary and return empty lists.
+
+## Suggested changes — offer the fix when the fix is obvious
+
+When a comment's fix is small and mechanical, don't describe it, write it. GitHub renders a
+```suggestion block as a one-click "Commit suggestion" button, which turns a typo into two seconds
+of the author's time instead of a round trip. Always attach one for:
+
+- typos and misspellings, in code, comments, docstrings and error messages
+- a wrong or misleading name where the right one is unambiguous
+- a stale comment or docstring that no longer matches the code
+- a one-line correctness fix you are sure of (a wrong comparison, a missing `not`, an off-by-one)
+- a redundant line that should simply be deleted (suggest the replacement with that line removed)
+
+Format, exactly:
+
+Nit: typo, "recieve" should be "receive".
+```suggestion
+    raise ValueError("could not receive the payload")
+```
+
+Rules that make the button actually work — a malformed suggestion is worse than no suggestion,
+because the author gets a broken commit instead of a fix:
+
+- The block replaces **the exact lines your comment is attached to**, so it must contain the full
+  replacement for those lines, not a fragment and not a diff. No `+`/`-` prefixes.
+- Reproduce the **original indentation** on every line. The block's content is inserted verbatim.
+- For a single line, set `line` and leave `start_line` out. To replace a run of consecutive lines,
+  set `start_line` to the first and `line` to the last, and give exactly that many lines back
+  (unless you are deliberately deleting some). Both must be lines the diff actually touches.
+- One suggestion per comment, and always after the prose, never before it.
+- Only for changes you are certain about. If the fix depends on something you cannot see, or there
+  is more than one reasonable way to do it, describe it in words instead. A wrong suggestion that
+  looks committable is the worst outcome here.
+- Never suggest on a `general` comment (one with a null `file` or `line`); there is nothing for
+  GitHub to attach it to.
 """
 
 # Appended to the review prompt when a PR is too large to inline its diff and
@@ -109,6 +145,28 @@ reviews a big PR: navigate, don't read linearly.
   numbers shown in the diff, exactly as in a normal review.
 - The response contract is unchanged: after exploring, your entire reply is still the single JSON
   object described above, and nothing else.
+"""
+
+# Appended at hardness 3 on a normally-sized PR: the diff is still inline, but
+# Claude also gets a read-only checkout to read around it (reviewer.review_pr).
+HARDNESS_EXPLORE_ADDENDUM = """
+
+---
+## You can read the repository
+
+You are running inside a read-only checkout of this PR's head commit, with Read, Glob and Grep. The
+full diff is inline above, so you do not need to go looking for it: use the tools to read what the
+diff does *not* show you.
+
+- Open the whole file before commenting on a hunk in it. A hunk that looks wrong in isolation is
+  often fine three lines further down, and the reverse is just as common.
+- Grep for the callers of anything the diff changed: a renamed symbol, a new argument, a different
+  return value or exception, a function that now takes longer or can block.
+- Check whether tests, docs, or type stubs elsewhere in the repo should have moved with this change.
+- Do not review files the PR does not touch. Reading them is context; commenting on them is scope
+  creep. `file` and `line` in every comment must point at lines this PR actually changes.
+- The response contract is unchanged: your entire reply is still the single JSON object described
+  above, and nothing else.
 """
 
 # Appended to every knowledge-base prompt so the documents read like notes a
@@ -234,6 +292,51 @@ TODOs, duplicated logic, missing tests, known technical debt, areas marked for r
 
 Ground every claim in something you actually read, and reference the file path. Max 1200 words.
 """ + KB_STYLE
+
+ARCH_GRAPH_PROMPT = """You are drawing the module map of a repository: the diagram a new maintainer
+would want on screen while reading the code for the first time.
+
+You have Read, Glob and Grep, and you are already in the repository root. Read the code. Do not
+infer the graph from file names alone: open the entry points and follow the actual imports.
+
+Your entire response is a single JSON object and nothing else. No preamble, no explanation, no
+markdown fence:
+
+{
+  "nodes": [
+    {
+      "id": "<stable short id, e.g. the module path: praline/github.py -> github>",
+      "label": "<what to print in the box, 1-2 words, e.g. github>",
+      "kind": "<exactly one of: entry | module | external>",
+      "summary": "<one short sentence: what this module is responsible for. Shown on hover.>"
+    }
+  ],
+  "edges": [
+    {"from": "<node id>", "to": "<node id that it depends on / calls into>", "label": "<0-3 words, or omit>"}
+  ]
+}
+
+What each kind means:
+- **entry**: a way into the system from outside. A CLI entry point, a server's main, a public
+  package API, a scheduled job. Usually one to three of them.
+- **module**: a first-party source module inside this repository.
+- **external**: a third-party dependency or outside system the code talks to, and only when it
+  matters to understanding the design (a database, an HTTP API, a CLI binary the code shells out
+  to, a heavyweight framework). Do not list every import; ordinary standard-library use is noise.
+
+Rules:
+- Direction is dependency direction: `from` uses `to`. Draw the edge the way the call goes.
+- At most 24 nodes. If the repo is bigger, group by package or directory and name the group, rather
+  than truncating the list and pretending the rest does not exist.
+- At most 3 outgoing edges per node, the most important ones. A diagram where everything points at
+  everything teaches nobody anything.
+- Every `from` and `to` must be an `id` that exists in `nodes`. An edge to a node you did not
+  declare will be dropped.
+- Ids must be unique. Keep them short, lowercase, and free of spaces.
+- No cosmetic nodes: no "user", no "config file", no box that exists to balance the picture.
+- `summary` is one plain sentence. Same style rules as the rest of the knowledge base: no filler,
+  no "this module is responsible for handling", just say what it does.
+"""
 
 INIT_PR_HISTORY_PROMPT = """You are analyzing merged pull requests from a software repository to extract lessons for future code review.
 

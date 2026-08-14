@@ -1,11 +1,9 @@
 """Review a PR with Claude and run the interactive per-comment approval loop."""
 
-import json
-import re
 import textwrap
 from pathlib import Path
 
-from . import claude_client, config, prompts
+from . import claude_client, config, hardness, prompts
 from .github import (
     DiffTooLargeError,
     PRInfo,
@@ -44,36 +42,6 @@ SEVERITY_LABEL = {
 }
 
 
-_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
-
-
-def _extract_json(raw: str) -> dict:
-    """Parse Claude's reply as JSON, tolerating the ways it sometimes deviates
-    from "just the object": a fenced code block, or prose before/after it.
-    Tries progressively looser extractions and keeps the first that parses."""
-    candidates = [raw.strip()]
-
-    fence_match = _FENCE_RE.search(raw)
-    if fence_match:
-        candidates.append(fence_match.group(1).strip())
-
-    first, last = raw.find("{"), raw.rfind("}")
-    if first != -1 and last > first:
-        candidates.append(raw[first : last + 1].strip())
-
-    last_error = None
-    for candidate in candidates:
-        try:
-            return json.loads(candidate)
-        except json.JSONDecodeError as e:
-            last_error = e
-
-    raise RuntimeError(
-        f"Claude's response wasn't valid JSON: {last_error}\n"
-        f"raw response (first 2000 chars): {raw[:2000]}"
-    )
-
-
 RECENT_REVIEWS_IN_PROMPT = 8
 
 
@@ -100,7 +68,7 @@ def _format_review_log(repo_dir: Path, pr: PRInfo | None) -> str:
         mine = " (THIS PR, earlier pass)" if pr and e.get("number") == pr.number else ""
         head = (
             f"- **#{e.get('number')} {e.get('title', '')}**{mine} "
-            f"by {e.get('author', '?')}, reviewed {e.get('reviewed_at', '?')} — "
+            f"by {e.get('author', '?')}, reviewed {e.get('reviewed_at', '?')}, "
             f"verdict `{e.get('status', '?')}`, "
             f"{e.get('comments_added', 0)} comment(s), {e.get('comments_left', 0)} reply(ies)"
         )
@@ -111,9 +79,15 @@ def _format_review_log(repo_dir: Path, pr: PRInfo | None) -> str:
 
 
 def _build_review_prompt(
-    repo_dir: Path, custom_prompt: str | None, pr: PRInfo | None = None
+    repo_dir: Path,
+    custom_prompt: str | None,
+    pr: PRInfo | None = None,
+    level: int = hardness.DEFAULT,
 ) -> str:
+    # The depth setting is orthogonal to the prompt itself: it says how hard to
+    # look, not what to look for, so it applies to a custom prompt too.
     base = custom_prompt or prompts.DEFAULT_REVIEW_PROMPT
+    base += "\n\n---\n" + hardness.get(level).addendum
     repo_knowledge = config.load_repo_knowledge(repo_dir)
     pr_history = config.load_pr_history(repo_dir)
     review_log = _format_review_log(repo_dir, pr)
@@ -246,28 +220,72 @@ def review_pr(
     model: str,
     custom_prompt: str | None,
     interactive: bool = True,
+    level: int = hardness.DEFAULT,
 ) -> dict:
     """Call Claude to review the PR. Returns parsed JSON response.
 
     PRs too large for GitHub's diff endpoint (406) fall back to a local git
     diff; `interactive` gates the explore-mode question there (auto mode has
-    no prompts, so it enables explore mode directly)."""
+    no prompts, so it enables explore mode directly).
+
+    `level` is the hardness setting: at the top level the review additionally
+    runs against a read-only checkout, so Claude can read around the diff."""
     try:
         diff = get_pr_diff(repo, pr.number)
     except DiffTooLargeError:
-        return _review_huge_pr(repo_dir, repo, pr, model, custom_prompt, interactive)
+        return _review_huge_pr(repo_dir, repo, pr, model, custom_prompt, interactive, level)
 
-    system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr)
+    system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr, level)
     user_msg = _build_user_msg(repo, pr, f"### Diff\n```diff\n{diff}\n```")
-    raw = claude_client.ask(system_prompt, user_msg, model=model)
-    return _extract_json(raw)
+    if hardness.explores(level):
+        raw = _ask_in_checkout(repo_dir, repo, pr, system_prompt, user_msg, model)
+    else:
+        raw = claude_client.ask(system_prompt, user_msg, model=model)
+    return claude_client.extract_json(raw)
+
+
+def _ask_in_checkout(
+    repo_dir: Path, repo: str, pr: PRInfo, system_prompt: str, user_msg: str, model: str
+) -> str:
+    """Run the review from a temporary read-only checkout of the PR head, so
+    Claude can Read/Glob/Grep the code the diff sits in.
+
+    The checkout is a convenience, not the review: if the PR head cannot be
+    fetched (no network, no access to the fork), fall back to reviewing the
+    diff on its own rather than failing."""
+    try:
+        fetch_pr_refs(repo_dir, repo, pr)
+        worktree = add_pr_worktree(repo_dir, pr.head_sha)
+    except Exception as e:
+        print(_c(f"  · no checkout to explore ({e}); reviewing the diff alone.", DIM))
+        return claude_client.ask(system_prompt, user_msg, model=model)
+
+    print(_c("  Reading the repo around the diff...", DIM))
+    try:
+        return claude_client.ask(
+            system_prompt + prompts.HARDNESS_EXPLORE_ADDENDUM,
+            user_msg,
+            model=model,
+            timeout=claude_client.EXPLORE_TIMEOUT_S,
+            tools=claude_client.READ_ONLY_TOOLS,
+            deny=claude_client.SECRET_DENY_RULES,
+            cwd=worktree,
+        )
+    finally:
+        remove_pr_worktree(repo_dir, worktree)
 
 
 DIFF_FILE = "PRALINE_DIFF.patch"
 
 
 def _review_huge_pr(
-    repo_dir: Path, repo: str, pr: PRInfo, model: str, custom_prompt: str | None, interactive: bool
+    repo_dir: Path,
+    repo: str,
+    pr: PRInfo,
+    model: str,
+    custom_prompt: str | None,
+    interactive: bool,
+    level: int = hardness.DEFAULT,
 ) -> dict:
     """Review a PR whose diff GitHub refuses to render (406, ~300+ files).
 
@@ -277,7 +295,7 @@ def _review_huge_pr(
     scratch file, so the review survives diffs that would not fit in context."""
     print(_c(f"⚠ Huge PR, careful: #{pr.number} exceeds GitHub's diff API limits.", YELLOW))
     print(_c("  Falling back to a local git diff (fetching the PR head from origin)...", DIM))
-    fetch_pr_refs(repo_dir, pr)
+    fetch_pr_refs(repo_dir, repo, pr)
     diff = get_pr_diff_local(repo_dir, pr)
     diffstat = get_pr_diffstat_local(repo_dir, pr)
     # The last --stat line reads "N files changed, X insertions(+), Y deletions(-)".
@@ -285,7 +303,10 @@ def _review_huge_pr(
     print(f"  {diffstat.splitlines()[-1].strip()}")
     print(f"  Diff size: {len(diff.splitlines())} lines ({len(diff) // 1024} KB)")
 
-    if interactive:
+    if hardness.explores(level):
+        print(_c(f"  Depth {hardness.label(level)}: exploring the checkout anyway.", DIM))
+        explore = True
+    elif interactive:
         print(
             "  A diff this size may not fit the model's context in one prompt. In explore\n"
             "  mode, Claude instead reviews from a temporary read-only checkout of the PR\n"
@@ -299,9 +320,9 @@ def _review_huge_pr(
 
     if not explore:
         user_msg = _build_user_msg(repo, pr, f"### Diff\n```diff\n{diff}\n```")
-        system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr)
+        system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr, level)
         raw = claude_client.ask(system_prompt, user_msg, model=model)
-        return _extract_json(raw)
+        return claude_client.extract_json(raw)
 
     worktree = add_pr_worktree(repo_dir, pr.head_sha)
     try:
@@ -311,7 +332,7 @@ def _review_huge_pr(
             f"### Diff\nToo large to include here. The full diff is in `{DIFF_FILE}` at the "
             "checkout root; read it in slices as instructed."
         )
-        system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr)
+        system_prompt = _build_review_prompt(repo_dir, custom_prompt, pr, level)
         system_prompt += prompts.HUGE_PR_EXPLORE_ADDENDUM
         print(_c("  Explore mode: Claude is reviewing from a temporary checkout...", DIM))
         raw = claude_client.ask(
@@ -325,7 +346,23 @@ def _review_huge_pr(
         )
     finally:
         remove_pr_worktree(repo_dir, worktree)
-    return _extract_json(raw)
+    return claude_client.extract_json(raw)
+
+
+def _location(c: dict) -> str:
+    """`path/to/file.py:12` or `path/to/file.py:12-15` for a range."""
+    if not c.get("file"):
+        return ""
+    if not c.get("line"):
+        return c["file"]
+    start = c.get("start_line")
+    span = f"{start}-{c['line']}" if start and start < c["line"] else str(c["line"])
+    return f"{c['file']}:{span}"
+
+
+def has_suggestion(c: dict) -> bool:
+    """Whether the comment carries a one-click GitHub suggestion block."""
+    return "```suggestion" in c.get("body", "")
 
 
 def _quote(text: str, width: int = 76, max_lines: int = 3) -> str:
@@ -338,26 +375,26 @@ def _quote(text: str, width: int = 76, max_lines: int = 3) -> str:
 
 def _display_comment(idx: int, total: int, c: dict, comment_lookup: dict | None = None) -> None:
     label = SEVERITY_LABEL.get(c.get("severity", "nit"), "💬")
-    location = ""
-    if c.get("file"):
-        location = c["file"]
-        if c.get("line"):
-            location += f":{c['line']}"
+    location = _location(c)
     print(f"\n{'─'*60}")
     if c.get("reply_to_id"):
         resolved_tag = "  ✓ marks resolved" if c.get("resolved") else ""
-        print(f"[{idx}/{total}] {label} — replying to comment #{c['reply_to_id']}{resolved_tag}")
+        print(f"[{idx}/{total}] {label} replying to comment #{c['reply_to_id']}{resolved_tag}")
         original = (comment_lookup or {}).get(c["reply_to_id"])
         if original:
             loc = original.get("path") or ""
             if original.get("line"):
                 loc += f":{original['line']}"
-            print(f"  context — @{original['author']} {('on ' + loc) if loc else ''}:")
+            print(f"  context: @{original['author']} {('on ' + loc) if loc else ''}:")
             print(_quote(original["body"]))
         print()
     else:
-        print(f"[{idx}/{total}] {label}  {location}")
-    print(textwrap.fill(c["body"], width=80, subsequent_indent="  "))
+        suggests = _c("  🔧 with suggestion", DIM) if has_suggestion(c) else ""
+        print(f"[{idx}/{total}] {label}  {location}{suggests}")
+    # A suggestion block is code: wrapping it would break the exact indentation
+    # GitHub commits, so bodies carrying one are printed as written.
+    body = c["body"]
+    print(body if has_suggestion(c) else textwrap.fill(body, width=80, subsequent_indent="  "))
     print()
 
 
@@ -383,7 +420,7 @@ def _prompt_action(c: dict) -> tuple[str, str]:
             new_body = "\n".join(lines).strip()
             if new_body:
                 return "accept", new_body
-            print("  (empty — keeping original)")
+            print("  (empty, keeping the original)")
 
 
 def run_approval_loop(review: dict, comment_lookup: dict | None = None) -> list[dict]:
@@ -402,23 +439,26 @@ def run_approval_loop(review: dict, comment_lookup: dict | None = None) -> list[
         print("No comments to review.")
         return []
 
-    print("OVERVIEW — all proposed comments")
+    print("OVERVIEW: all proposed comments")
     print(f"{'═'*60}")
     for i, c in enumerate(all_items, 1):
         label = SEVERITY_LABEL.get(c.get("severity", "nit"), "💬")
-        loc = c.get("file", "") or ""
-        if c.get("line"):
-            loc += f":{c['line']}"
+        loc = _location(c)
+        if has_suggestion(c):
+            loc += " 🔧"
         if c.get("reply_to_id"):
             original = (comment_lookup or {}).get(c["reply_to_id"])
             who = f" to @{original['author']}" if original else ""
             resolved_tag = " ✓resolves" if c.get("resolved") else ""
             loc = f"↩ reply{who} on #{c['reply_to_id']}{resolved_tag}"
         print(f"  {i:2}. {label}  {loc or '(general)'}")
-        print(f"      {c['body'][:80]}{'…' if len(c['body']) > 80 else ''}")
+        # One line in the overview, so a body with a suggestion block in it
+        # doesn't spill its newlines across the list.
+        preview = " ".join(c["body"].split())
+        print(f"      {preview[:80]}{'…' if len(preview) > 80 else ''}")
 
     print(f"\n{'═'*60}")
-    print("REVIEW — comment by comment")
+    print("REVIEW: comment by comment")
     print(f"{'═'*60}")
 
     accepted = []
@@ -458,8 +498,12 @@ def post_accepted_comments(repo: str, pr: PRInfo, accepted: list[dict]) -> None:
                     except Exception as e:
                         print(f"    ✗ could not resolve thread: {e}")
             elif file_ and line_:
-                post_pr_review_comment(repo, pr.number, body, file_, line_, pr.head_sha)
-                print(f"  ✓ line comment on {file_}:{line_}")
+                start = c.get("start_line")
+                post_pr_review_comment(
+                    repo, pr.number, body, file_, line_, pr.head_sha, start_line=start
+                )
+                span = f"{start}-{line_}" if start and start < line_ else str(line_)
+                print(f"  ✓ line comment on {file_}:{span}")
             else:
                 post_pr_comment(repo, pr.number, body)
                 print("  ✓ general comment")
