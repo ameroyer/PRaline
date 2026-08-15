@@ -69,8 +69,15 @@ def config_paths(repo_dir: Path) -> list[Path]:
 
 @dataclass
 class SlackConfig:
-    token: str
-    users: dict[str, str] = field(default_factory=dict)
+    # repr=False, like the two cached maps below: a dataclass repr is one
+    # `print(cfg)` or one exception away from putting the bot token in a log, a
+    # terminal, or an MCP tool result. Nothing prints this today; the point is
+    # that nothing can start to by accident.
+    token: str = field(repr=False)
+    # The mapping is identity data: real names, @handles or work email addresses
+    # for everyone on the team. It is no more printable than the token, and
+    # callers that want to say something about it print len(cfg.users).
+    users: dict[str, str] = field(default_factory=dict, repr=False)
     source: str = "environment"
     reviewer_login: str = ""  # GitHub login of whoever is running PRaline
     _by_login: dict[str, str] = field(default_factory=dict, repr=False)
@@ -284,7 +291,7 @@ def digest_message(repo: str, reviewed: list[dict]) -> str:
         "minor": "*🛠️ Needs minor revisions*",
         "wip": "*🚧 Work in progress*",
     }
-    lines = [f"🍫 *PRaline* just reviewed {len(reviewed)} PR(s) in *{repo}* for you:"]
+    lines = [f"🍫 *PRaline* just reviewed {len(reviewed)} PR(s) in *{_escape(repo)}* for you:"]
     for key in order:
         group = [r for r in reviewed if str(r.get("status", "")) == key]
         if not group:
@@ -298,8 +305,22 @@ def digest_message(repo: str, reviewed: list[dict]) -> str:
                     f": {r.get('comments_added', 0)} comment(s), "
                     f"{r.get('comments_left', 0)} reply(ies)"
                 )
-            lines.append(f"• <{r.get('url', '')}|#{r.get('number')} {r.get('title', '')}>{counts}")
+            title = _escape(str(r.get("title", "")))
+            lines.append(f"• <{r.get('url', '')}|#{r.get('number')} {title}>{counts}")
     return "\n".join(lines)
+
+
+def _escape(text: str) -> str:
+    """Make text safe to interpolate into a Slack message.
+
+    PR titles, authors and the review overview all reach these messages from
+    outside: a title is whatever the PR author typed, and the overview is model
+    output written after reading their diff. Slack reads `<...>` as markup, so
+    unescaped text can forge a link (`<https://evil|click here>`) or ping the
+    room (`<!channel>`). Slack's documented rule is these three, ampersand
+    first, and it applies to message text only: the `<url|label>` syntax this
+    module builds around it stays intact."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def _quote_block(text: str) -> str:
@@ -322,11 +343,12 @@ def review_message(
         detail = "Nothing to flag — it looks good to me. 🎉"
 
     lines = [
-        f"🍫 *PRaline* reviewed <{pr.url}|{repo}#{pr.number}: {pr.title}> (by @{pr.author})",
+        f"🍫 *PRaline* reviewed <{pr.url}|{_escape(repo)}#{pr.number}: {_escape(pr.title)}>"
+        f" (by @{_escape(pr.author)})",
         f"*Status:* {status_label(review)}",
         detail,
     ]
     overview = overview_of(review, items)
     if overview:
-        lines.append("\n*Overview*\n" + _quote_block(overview))
+        lines.append("\n*Overview*\n" + _quote_block(_escape(overview)))
     return "\n".join(lines)

@@ -365,12 +365,9 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <code>reviewer.post_accepted_comments</code>. There is no approval loop.
       </p>
       <ol>
-        <li><code>auto.select_prs</code> lists open PRs and keeps a PR if it was passed explicitly
-        as an argument, or if it is not a draft and has activity (its own <code>updated_at</code>,
-        or a comment created or edited) more recent than the last time this user auto-reviewed
-        it. Explicit PR numbers skip both the draft and activity checks. The result is returned in
-        <code>watch.order_prs</code> order (see <a href="#watching">below</a>), so stacks are
-        reviewed bottom-up.</li>
+        <li>A PR qualifies if its number was passed
+        as an argument, or if it is not a draft and either has never been reviewed here or has been
+        <em>commented on</em> since it last was.</li>
         <li><code>auto._has_new_activity</code> checks the PR's own <code>updated_at</code> first and
         only pays for the two comment endpoints when that says no. The fetch exists solely to catch
         a comment edited in place without the PR being bumped.</li>
@@ -394,13 +391,38 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         skip that step for PRs the user has pointed it at.
       </p>
 
+      <h3>What starts a review</h3>
+      <p>
+        <code>select_prs</code> takes <code>on_new_commits</code>, which picks between two
+        predicates. <code>_has_new_comments</code> is the default in both unattended modes: a PR
+        requalifies only when someone has commented. <code>_has_new_activity</code> is the wider
+        one, reached with <code>--review-new-commits</code>, where a push counts too.
+      </p>
+      <p>
+        The narrow one is the default because nobody asked for the review a push would trigger. An
+        author iterating on a branch would collect a near-identical review per commit, which is
+        noise for them and budget for the user. A comment is someone addressing the review, and
+        that is worth answering.
+      </p>
+      <p>
+        Both predicates share <code>_commented_since</code> and differ only in how they use
+        <code>pr.updated_at</code>. For the wide one it is a cheap <em>positive</em>: anything that
+        bumps it counts, so the comment endpoints are only paid for when it says no. For the narrow
+        one it is a cheap <em>negative</em>: a PR nothing has touched cannot have been commented on,
+        but a bump alone proves nothing, so the comments are still read. Do not collapse them into
+        one shortcut; the asymmetry is the point.
+      </p>
+
       <h2 id="monitor">Monitor mode &amp; budgets</h2>
       <p>
         <code>praline monitor</code> is a loop around <code>auto.run_auto</code>, which already
-        reviews exactly the PRs with activity since the last pass: non-draft, and skipping anything
-        already reviewed with nothing new on it. <code>monitor.py</code> adds only what turns a
-        one-shot command into something you can leave running. Keep that division: selection and
-        review logic belongs in <code>auto</code>, not in the loop.
+        picks the PRs worth reviewing. <code>monitor.py</code> adds only what turns a one-shot
+        command into something you can leave running. Keep that division: selection and review
+        logic belongs in <code>auto</code>, not in the loop.
+      </p>
+      <p>
+        What requalifies a PR is decided in <code>auto.select_prs</code> and shared by both modes:
+        see <a href="#auto-mode">Auto mode</a>.
       </p>
       <p>
         The one change monitor mode forced on <code>auto</code> is
@@ -419,10 +441,19 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       </p>
       <p>
         <strong>The knowledge base is refreshed when PRs merge</strong> while watching, via
-        <code>memory.merged_since_last_update</code>. That refresh passes
-        <code>with_graph=False</code> on purpose: the module map is the most expensive call PRaline
-        makes and codebase shape moves far more slowly than merged PRs, so redrawing it unattended
-        would spend most of the budget on the part that changed least.
+        <code>memory.merged_since_last_update</code>. That refresh redraws the module map only when
+        the repo has never had one: the map is the most expensive call PRaline makes and codebase
+        shape moves far more slowly than merged PRs, so redrawing an existing one unattended would
+        spend most of the budget on the part that changed least. A repo only ever watched would
+        otherwise never get a map at all, which is why the first one is exempt.
+      </p>
+      <p>
+        <strong>The page is re-rendered at startup</strong> by <code>memory.rerender_html</code>,
+        which reads the documents already on disk and calls nothing. The page and the documents age
+        at different rates: documents change with the repo, the page changes with PRaline's
+        template. Without this, a knowledge base built before a template change keeps producing the
+        old page, and the symptom is a section the code plainly emits being absent from the file
+        the user is looking at.
       </p>
 
       <h3>The budget</h3>
@@ -770,9 +801,12 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         is repo-internal but not secret. Do not move anything sensitive into that argument.</li>
         <li><code>.praline/</code> lives in the reviewed repo and describes it in detail. PRaline
         warns when it is not ignored but cannot fix it, since it never commits.</li>
-        <li>A PR diff or description is untrusted input that ends up in a prompt. The interactive
-        approval loop is what stands between that and a posted comment. Auto mode removes it
-        deliberately, which is the reason it is opt-in per invocation.</li>
+        <li>A PR diff or description is untrusted input that ends up in a prompt, in the same
+        prompt as the knowledge base, the PR-history lessons and the review log. The interactive
+        approval loop is what stands between that and a posted comment. <code>auto</code> and
+        <code>monitor</code> remove it deliberately, so on those paths a PR crafted to make the
+        model quote its own context can put internal notes into a public comment. That is the
+        residual risk of unattended review and the reason both are opt-in.</li>
       </ul>
 
       <h2 id="invariants">Invariants</h2>
@@ -786,6 +820,26 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <li><strong>Slack only ever sends, and only to people.</strong> The four methods called are <code>auth.test</code>, a user lookup, <code>conversations.open</code> and <code>chat.postMessage</code> to a DM or group DM. No channels, no history reads, and a Slack failure never rolls back or blocks a review.</li>
         <li><strong>Nothing posts from the MCP server without a second call.</strong> <code>review_pr_draft</code> drafts and returns; <code>post_review</code> publishes what the user picked. Any new tool that writes to GitHub stays separate from the tool that produces the content, for the same reason the interactive loop exists.</li>
         <li><strong>Every review is grounded in the accumulated knowledge.</strong> <code>reviewer._build_review_prompt</code> is the single place that appends <code>repo.md</code>, <code>pr_history.md</code> and the review log, and every review path goes through it, including huge-PR explore mode, depth 3, and the MCP tool. A new path that assembles a prompt some other way silently loses the repo-specific half of the review. The module map is deliberately not in there; it is for the HTML page.</li>
+        <li><strong>The rendered knowledge base never carries live markup.</strong>
+        <code>render._NoRawHtml</code> deregisters Markdown's <code>html_block</code> preprocessor
+        and <code>html</code> inline pattern, so raw HTML in <code>repo.md</code> or
+        <code>pr_history.md</code> becomes visible text. Both files are model output over content
+        that includes attacker-controlled PR titles and bodies, and the page they produce is opened
+        over <code>file://</code> and published as an artifact. Do not "fix" this by escaping the
+        HTML stash instead: <code>fenced_code</code> shares that stash, and every code block in the
+        document would be double-escaped.</li>
+        <li><strong>Anything untrusted printed to the terminal goes through <code>term.plain</code>.</strong>
+        PR titles, author names and comment bodies are written by other people, and GitHub does not
+        strip control bytes on the way out. A title carrying <code>\r\x1b[2K</code> erases its own
+        line and reprints whatever the author chose, which in a tool driven by
+        <code>[a]ccept/[r]eject</code> and <code>[Y/n]</code> prompts is a way to forge what the
+        user thinks they are approving. Colour is applied by <code>_c</code> around the sanitized
+        text, never taken from the text. If you add a print of anything that came from GitHub or
+        from the model, wrap it.</li>
+        <li><strong>Anything quoted into a Slack message goes through <code>slack._escape</code>.</strong>
+        Slack reads <code>&lt;...&gt;</code> as markup, so an unescaped PR title can forge a link or
+        ping the room. The <code>&lt;url|label&gt;</code> syntax this module builds is applied after
+        escaping, never to it.</li>
         <li><strong>Unattended modes stay capped and non-draft.</strong> Monitor mode gets a token budget whether or not one was asked for, and drafts never qualify for an automatic review. Both are what makes leaving it running defensible.</li>
         <li><strong>The review reply is JSON with a fixed schema.</strong> The schema lives in <code>prompts.DEFAULT_REVIEW_PROMPT</code> and its consumers are <code>run_approval_loop</code> and <code>post_accepted_comments</code>. Change all of them together, and remember users can supply custom prompt files that must still produce the same schema.</li>
       </ul>

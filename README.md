@@ -142,7 +142,11 @@ Add `.praline/` to that repo's `.gitignore`. PRaline warns at start-up if you ha
 
 Above it: modules, dependencies, tracked files, commits, contributors. Those are counted from git rather than reported by the model, so they're checkable.
 
-It's redrawn on every update, and it's the one part of the knowledge base that's decoration. If drawing it fails, the previous map is kept and the documents are written anyway.
+The map is drawn by a full update: menu `[2]`, or the MCP `update_knowledge_base` tool. If drawing it fails, the previous map is kept and the documents are written anyway, since it is the one part of the knowledge base that is decoration.
+
+`monitor` refreshes the knowledge base when PRs merge, and draws the map once if the repo has never had one, but it will not redraw an existing one: codebase shape moves slowly and that call is the most expensive PRaline makes.
+
+The page itself is re-rendered from the documents on disk whenever `monitor` starts, which costs nothing. That matters because the page and the documents age differently. The documents change when your repo does; the page changes whenever PRaline's template does. Without it, a knowledge base built before an update keeps producing the older page, missing sections the current version would add.
 
 ## What it can and cannot touch
 
@@ -152,6 +156,10 @@ It's redrawn on every update, and it's the one part of the knowledge base that's
 - **No writes to your code.** Every GitHub call is a read, a comment, an issue, or a review re-request: nothing pushes, merges, approves, or creates a branch. Locally, git only ever writes outside your checkout: `git fetch` updates remote-tracking refs, and huge-PR explore mode adds a temporary detached worktree in `/tmp` that is removed right after the review. Your working tree, index, and branches are never touched.
 - **The codebase scan and explore mode are read-only and blocked from secrets.** They get `Read`, `Glob` and `Grep`, no shell and no network, and no credentials in their environment. Credential files (`.env*`, `*.pem`, `*.key`, `id_rsa*`, `.netrc`, `secrets.*`, `credentials.*` and the like) are denied by the CLI itself, for `Grep` as well as `Read`, and the prompt forbids copying a secret value it happens to see in ordinary source.
 - **Slack, if enabled, only ever sends.** The bot token is read from your environment or from a config file outside the repo, never written anywhere by PRaline, and only four Slack methods are called: `auth.test`, a user lookup, `conversations.open` for the group chat (skipped entirely for a 1:1 DM), and `chat.postMessage`. It never reads a channel, never reads history, and posts nothing beyond the PR title, its URL, the verdict, the comment counts, and the overview PRaline itself wrote.
+- **The published knowledge base is inert.** `knowledge.html` is written from model output over your repo, and its PR-history half is distilled from PR titles and bodies, which anyone able to open a PR controls. Raw HTML in any of that is escaped to visible text rather than rendered, so a `<script>` cannot ride into the page you open from disk or publish as an artifact.
+- **Nothing untrusted reaches your terminal raw.** A PR title, an author name and a comment body are all whatever somebody typed, and GitHub does not strip control bytes. A title carrying `\r\x1b[2K` erases the line it prints on and puts whatever its author wants there, which in a tool that asks you to approve things is a way to forge what you are approving. Control characters are removed before anything is printed.
+- **Slack messages escape what they quote.** PR titles, authors and the review overview are escaped before they go into a message, so a crafted title cannot forge a link or ping the room.
+- **In unattended mode, a hostile PR is talking to a prompt that holds your knowledge base.** Every review prompt carries the repo knowledge, the PR-history lessons and the review log, and a PR's diff and description sit in the same prompt as untrusted text. Interactive mode has you between that and GitHub. `auto` and `monitor` do not: whatever comes back is posted publicly, under your account. A PR crafted to make the model quote its own context could therefore put internal notes in a public comment. This is the reason both are opt-in and the reason to point them only at repos whose contributors you trust.
 - **You approve every comment**, except in auto mode. That is why auto mode is a separate subcommand: it posts without asking, so a PR description or diff written to talk a reviewer into something has no human in the way. Point it at repos whose contributors you trust.
 
 ## What's new since last time
@@ -314,6 +322,28 @@ After posting, PRaline puts you back on the PR's requested-reviewer list, the AP
 
 It's skipped automatically on your own PRs (GitHub rejects that), reported and shrugged off if it fails, and turned off entirely with `--no-request-review`. This is the only call PRaline makes that writes PR metadata rather than a comment; it cannot approve, merge, or touch code.
 
+## What starts a review
+
+`praline auto` and `praline monitor` both choose PRs the same way. A PR is reviewed when it is:
+
+- **newly open**, meaning PRaline has not reviewed it here before, or
+- **commented on** since PRaline last reviewed it.
+
+Drafts never qualify, and neither does a PR nobody has touched since its last review.
+
+**A push on its own does not requalify a PR.** That is deliberate. Nobody asked for that review, the author is usually mid-work, and an author iterating on a branch would collect a near-identical review on every commit: noise for them, spend for you. A comment is someone actually addressing the review, and that is worth answering.
+
+Pass `--review-new-commits` to either mode if you want pushes to count too:
+
+```bash
+praline auto --review-new-commits
+praline monitor --review-new-commits
+```
+
+Naming PRs explicitly bypasses all of it, as before: `praline auto 123 456` reviews those two whatever their state, draft included.
+
+Last-reviewed timestamps live per PR in `.praline/auto_state.json`, and both modes share them.
+
 ## Auto mode
 
 `praline auto` reviews PRs unattended: no approval loop, every proposed comment is posted straight away.
@@ -323,14 +353,14 @@ uvx --from git+https://github.com/ameroyer/PRaline praline auto
 uvx --from git+https://github.com/ameroyer/PRaline praline auto 123 456
 ```
 
-- Scans open PRs, skipping drafts, and only reviews ones with new activity (a new commit, comment, or review) since you last auto-reviewed them.
+- Scans open PRs, skipping drafts, and reviews the ones worth reviewing: newly open, or commented on since you last auto-reviewed them. A push on its own does not requalify a PR (see [What starts a review](#what-starts-a-review)).
 - Reviews them oldest first, stacks bottom-up (see [Review order and PR stacks](#review-order-and-pr-stacks)).
 - PR numbers passed as arguments are always reviewed, draft or not, activity or not.
 - Before reviewing, it prints the total changed-file count across all selected PRs. Past `--max-changed-files` (default 500) it asks for a one-time confirmation; everything else runs unattended.
 - Ends with a per-PR summary: files changed, comments added, replies left, threads resolved.
 - With `--slack`, the same verdict, counts and overview go to Slack once each PR's comments are posted, and you get the round-up at the end.
 
-Last-reviewed timestamps are stored per PR in `.praline/auto_state.json` inside the target repo. To run this continuously rather than by hand, see [Monitor mode](#monitor-mode).
+To run this continuously rather than by hand, see [Monitor mode](#monitor-mode).
 
 ## Monitor mode
 
@@ -339,16 +369,19 @@ Last-reviewed timestamps are stored per PR in `.praline/auto_state.json` inside 
 ```bash
 praline monitor                                    # look every 5 minutes
 praline monitor --interval 900 --tokens-per-hour 60000
+praline monitor --review-new-commits        # let pushes requalify a PR too
 praline monitor --once                     # a single pass, then exit
 ```
 
-Each pass picks up exactly the PRs with activity since the last one (a new commit, a new comment, a review), reviews them oldest-first with stacks bottom-up, and posts. Between passes it sleeps.
+Each pass reviews the PRs worth reviewing, oldest-first with stacks bottom-up, and posts. Between passes it sleeps.
+
+See [What starts a review](#what-starts-a-review) for which PRs each pass picks up.
 
 It takes every flag the other modes take (`--model`, `-H/--hardness`, `--slack`, `--repo`, `--dir`, `--no-request-review`) and applies them to each pass, so watching at depth 2 with Slack pings is just `praline monitor -H 2 --slack`. The header prints the settings it's running under.
 
 It is built to be left alone:
 
-- **Drafts are skipped**, and so is any PR it already reviewed that has had no new activity since. Reopening the same PR twice with nothing changed costs nothing.
+- **It only reviews what is worth reviewing**, on the rules above: drafts never, pushes never on their own, already-reviewed-and-quiet never.
 - **It keeps the knowledge base current**, rebuilding it when PRs are merged while it watches, so reviews don't drift out of date. The module map isn't redrawn on that path, since it's the most expensive call PRaline makes and codebase shape moves slowly, so redraw it from the menu when you want it. `--no-knowledge-refresh` turns the whole thing off.
 - **Every pass starts from a fresh view of GitHub.** Comment data cached during one pass is dropped before the next, so a comment left while it's running is seen rather than missed.
 - **A failure never ends the watch.** GitHub briefly unreachable, a malformed reply, one PR that fails: reported, then it backs off for two minutes and tries again on the next pass.

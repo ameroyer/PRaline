@@ -13,10 +13,33 @@ from pathlib import Path
 from string import Template
 
 import markdown
+from markdown.extensions import Extension
 
 _HTML_TEMPLATE = Path(__file__).parent / "templates" / "knowledge.html"
 
 _EMPTY_TOC = '<div class="toc">\n<ul></ul>\n</div>'
+
+
+class _NoRawHtml(Extension):
+    """Treat raw HTML in the source as text rather than markup.
+
+    Markdown passes it through by default, which is wrong for this document at
+    every step of how it is produced and used. The knowledge base is written by
+    a model reading a repository, and its PR history is distilled from PR titles
+    and bodies, which anyone able to open a PR controls. The result is rendered
+    to a page that gets opened from disk and published as an artifact, and a
+    `<script>` surviving that chain runs with no same-origin protection at all
+    over `file://`. Escaping is done here rather than trusted to a prompt
+    telling the model not to emit any.
+
+    The two processors dropped below are the only places source HTML is
+    recognised. Fenced code keeps working because `fenced_code_block` stashes
+    its own output separately; escaping the stash instead would double-escape
+    every code block in the document."""
+
+    def extendMarkdown(self, md) -> None:
+        md.preprocessors.deregister("html_block")
+        md.inlinePatterns.deregister("html")
 
 
 def _knowledge_body(repo_knowledge: str, pr_history: str) -> str:
@@ -125,7 +148,7 @@ def knowledge_html(
     stats: list[dict] | None = None,
 ) -> str:
     md = markdown.Markdown(
-        extensions=["fenced_code", "tables", "toc"],
+        extensions=["fenced_code", "tables", "toc", _NoRawHtml()],
         extension_configs={"toc": {"anchorlink": False, "permalink": False}},
     )
     body = md.convert(_knowledge_body(repo_knowledge, pr_history))
@@ -136,8 +159,8 @@ def knowledge_html(
     graph_json = json.dumps(graph).replace("<", "\\u003c")
     # safe_substitute, not substitute: the template has literal `$` in its prose.
     return Template(_HTML_TEMPLATE.read_text()).safe_substitute(
-        title=f"{repo} knowledge base",
-        repo=repo,
+        title=html.escape(f"{repo} knowledge base"),
+        repo=html.escape(repo),
         body=body,
         toc="" if md.toc.strip() == _EMPTY_TOC else md.toc,
         glance=glance,

@@ -32,7 +32,21 @@ from .reviewer import (
     review_pr,
     run_approval_loop,
 )
-from .term import BOLD, CYAN, DIM, GREEN, MAGENTA, MASCOT, RED, RESET, YELLOW, _c, _rule, confirm
+from .term import (
+    BOLD,
+    CYAN,
+    DIM,
+    GREEN,
+    MAGENTA,
+    MASCOT,
+    RED,
+    RESET,
+    YELLOW,
+    _c,
+    _rule,
+    confirm,
+    plain,
+)
 from .verdict import reviewed_entry
 
 BANNER = f"""{CYAN}{BOLD}
@@ -117,7 +131,11 @@ def _show_pr_status(repo: str, pr) -> None:
     print(_c(f"\n{MASCOT} Fetching PR #{pr.number} details from GitHub...", DIM))
     status = get_pr_status(repo, pr.number)
     print(f"\n{_rule()}")
-    print(f"{_c(f'#{pr.number}', MAGENTA)} {_c(pr.title, BOLD)}  {_c(f'by {pr.author}', DIM)}")
+    draft = _c("  [draft, not open for review yet]", YELLOW) if pr.draft else ""
+    print(
+        f"{_c(f'#{pr.number}', MAGENTA)} {_c(plain(pr.title), BOLD)}  "
+        f"{_c(f'by {plain(pr.author)}', DIM)}{draft}"
+    )
     additions = _c(f"+{status['additions']}", GREEN)
     deletions = _c(f"-{status['deletions']}", RED)
     print(
@@ -126,7 +144,7 @@ def _show_pr_status(repo: str, pr) -> None:
         f"💬 {status['comment_count']} comment(s)"
     )
     if status["comment_authors"]:
-        by = ", ".join(f"{u} ({n})" for u, n in status["comment_authors"].items())
+        by = ", ".join(f"{plain(u)} ({n})" for u, n in status["comment_authors"].items())
         print(f"  🗣  by: {by}")
     print(_rule())
 
@@ -218,7 +236,7 @@ def _do_review(run: config.Run, session: list) -> None:
 
     if len(prs) == 1:
         pr = prs[0]
-        print(f"Only one open PR, reviewing #{pr.number}: {pr.title}")
+        print(f"Only one open PR, reviewing #{pr.number}: {plain(pr.title)}")
     else:
         pr = _pick_pr(repo_dir, prs)
         if pr is None:
@@ -394,6 +412,16 @@ def _add_common_args(parser: argparse.ArgumentParser, subcommand: bool = False) 
     )
 
 
+def _add_review_trigger_arg(parser: argparse.ArgumentParser) -> None:
+    """The push trigger, shared by the two modes that select PRs themselves."""
+    parser.add_argument(
+        "--review-new-commits",
+        action="store_true",
+        help="Also re-review a PR when it gets new commits. Off by default: only a "
+        "PR that is newly open, or that someone has commented on, starts a review",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="praline",
@@ -414,6 +442,7 @@ def main():
         metavar="PR",
         help="Specific PR number(s) to review, bypassing the draft and new-activity filters",
     )
+    _add_review_trigger_arg(auto_parser)
     auto_parser.add_argument(
         "--max-changed-files",
         type=int,
@@ -441,6 +470,7 @@ def main():
         help=f"Skip a batch of PRs larger than this, leaving them for a human "
         f"(default: {config.DEFAULT_MAX_CHANGED_FILES})",
     )
+    _add_review_trigger_arg(monitor_parser)
     monitor_parser.add_argument(
         "--no-knowledge-refresh",
         action="store_true",
@@ -521,13 +551,19 @@ def main():
         warn_if_no_knowledge(repo_dir)
 
     if args.command == "auto":
-        run_auto(run, pr_numbers=args.pr_numbers, max_changed_files=args.max_changed_files)
+        run_auto(
+            run,
+            pr_numbers=args.pr_numbers,
+            max_changed_files=args.max_changed_files,
+            on_new_commits=args.review_new_commits,
+        )
     elif args.command == "monitor":
         run_monitor(
             run,
             interval_s=args.interval,
             max_changed_files=args.max_changed_files,
             refresh_knowledge=not args.no_knowledge_refresh,
+            on_new_commits=args.review_new_commits,
             once=args.once,
         )
     else:

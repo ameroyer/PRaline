@@ -1,8 +1,8 @@
 """Monitor mode: keep watching a repo and review PRs as they arrive.
 
-One loop around `auto.run_auto`, which already reviews exactly the PRs with
-activity since the last pass. The loop adds the four things that turn a one-shot
-command into something you can leave running for a day:
+One loop around `auto.run_auto`, which already picks the PRs worth reviewing.
+The loop adds the five things that turn a one-shot command into something you
+can leave running for a day:
 
   - **It survives failures.** GitHub briefly unreachable, a malformed model
     reply, a PR that fails to review — none of those may end the watch.
@@ -10,6 +10,10 @@ command into something you can leave running for a day:
   - **It starts each pass from a clean view.** The comment cache is emptied,
     because a cache scoped to one look at a PR is wrong for a process that
     looks a hundred times (see github.forget_all_comments).
+  - **It reviews on conversation, not on pushes.** A new PR or a new comment
+    requalifies one; a commit on its own does not. Someone iterating on their
+    branch would otherwise collect a near-identical review per push. Pass
+    --review-new-commits to opt back in.
   - **It keeps the knowledge base current**, refreshing it when PRs have been
     merged since it was last built, so reviews do not drift out of date.
   - **It respects a budget**, waiting for the window to roll forward rather
@@ -65,21 +69,27 @@ def _sleep(seconds: int, reason: str) -> None:
 def _refresh_knowledge(run: config.Run) -> str:
     """Rebuild the knowledge base if PRs have merged since it was last built.
 
-    The module map is deliberately not redrawn here. It is the most expensive
-    call PRaline makes and the shape of a codebase moves far more slowly than
-    its merged PRs, so an unattended refresh would spend most of the budget on
-    the part that changed least. Redraw it from the menu or the MCP tool."""
+    An existing module map is deliberately not redrawn: it is the most expensive
+    call PRaline makes and codebase shape moves far more slowly than merged PRs,
+    so an unattended refresh would spend most of the budget on the part that
+    changed least. Redraw it from the menu or the MCP tool. A repo that has no
+    map at all does get one, once."""
     if not config.knowledge_exists(run.repo_dir):
         return ""
     merged = memory.merged_since_last_update(run.repo, run.repo_dir)
     if not merged:
         return ""
+    # Draw the map if this repo has never had one. Redrawing an existing map is
+    # the expensive part and codebase shape moves slowly, but a repo only ever
+    # watched would otherwise never get one at all.
+    first_map = not config.load_graph(run.repo_dir)["nodes"]
     shown = ", ".join(f"#{p['number']}" for p in merged[:5])
     if len(merged) > 5:
         shown += ", …"
     print(_c(f"  {len(merged)} PR(s) merged since the last build ({shown}), refreshing.", CYAN))
-    memory.update_knowledge(run.repo_dir, run.repo, model=run.model, with_graph=False)
-    return f"knowledge base refreshed for {len(merged)} merged PR(s)"
+    memory.update_knowledge(run.repo_dir, run.repo, model=run.model, with_graph=first_map)
+    drew = ", module map drawn" if first_map else ""
+    return f"knowledge base refreshed for {len(merged)} merged PR(s){drew}"
 
 
 def _report(passes: int, results: list[dict], note: str) -> str:
@@ -113,6 +123,7 @@ def run_monitor(
     interval_s: int = DEFAULT_INTERVAL_S,
     max_changed_files: int = config.DEFAULT_MAX_CHANGED_FILES,
     refresh_knowledge: bool = True,
+    on_new_commits: bool = False,
     once: bool = False,
 ) -> None:
     interval_s = max(MIN_INTERVAL_S, interval_s)
@@ -123,6 +134,10 @@ def run_monitor(
     print(f"  every:    {interval_s // 60}m{interval_s % 60:02d}s   model: {_c(run.model, CYAN)}")
     print(f"  depth:    {_c(hardness.label(run.hardness), CYAN)}")
     print(f"  slack:    {'on' if run.slack is not None else 'off'}")
+    trigger = "a new PR, a new comment, or a new commit" if on_new_commits else (
+        "a new PR or a new comment (pushes alone do not requalify a PR)"
+    )
+    print(f"  reviews:  {trigger}")
     if not config.knowledge_exists(run.repo_dir):
         knowledge = "none yet — see the warning above"
     else:
@@ -133,6 +148,11 @@ def run_monitor(
     else:
         print(_c("  budget:   none, runs until you stop it (--tokens-per-hour caps it)", YELLOW))
     print(_c("  Drafts are skipped. Reviews post with no approval step. Ctrl-C to stop.", YELLOW))
+
+    if config.knowledge_exists(run.repo_dir):
+        # Costs nothing, and keeps the page in step with whatever template this
+        # version of PRaline ships.
+        memory.rerender_html(run.repo_dir, run.repo)
 
     passes = reviewed = 0
     # Far enough in the past that the first pass always checks.
@@ -150,7 +170,10 @@ def run_monitor(
                 if refresh_knowledge and due:
                     last_knowledge_check = time.monotonic()
                     note = _refresh_knowledge(run)
-                results = run_auto(run, [], max_changed_files, attended=False)
+                results = run_auto(
+                    run, [], max_changed_files, attended=False,
+                    on_new_commits=on_new_commits,
+                )
                 reviewed += len([r for r in results if "error" not in r])
                 reason = _report(passes, results, note)
             except budget.BudgetExceeded as e:

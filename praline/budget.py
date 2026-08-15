@@ -125,7 +125,10 @@ class Budget:
             stored = json.loads(path.read_text())
         except (OSError, ValueError):
             return budget
-        if stored.get("window_s") != window_s:
+        # A file that is not the shape we wrote is a file we cannot read. Start
+        # clean rather than raise: this is the safety cap, and it failing to
+        # load must never be the thing that stops a run.
+        if not isinstance(stored, dict) or stored.get("window_s") != window_s:
             return budget
         budget.calls = [
             (float(ts), int(tok), float(usd))

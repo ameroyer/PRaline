@@ -17,7 +17,7 @@ from pathlib import Path
 
 from . import config
 from .github import PRInfo, list_open_prs
-from .term import BOLD, CYAN, DIM, GREEN, MAGENTA, _c, _rule, confirm
+from .term import BOLD, CYAN, DIM, GREEN, MAGENTA, _c, _rule, confirm, plain
 
 NEW = "new"
 UPDATED = "updated"
@@ -150,13 +150,27 @@ def last_checked(repo_dir: Path) -> str | None:
 
 
 def format_line(change: PRChange, width: int = 4) -> str:
-    """One PR as a list row: icon, number, title, author."""
+    """One PR as a list row: icon, number, title, author.
+
+    A draft is greyed out whole, not tagged and left otherwise identical. It is
+    the one row in the list you cannot act on: unattended modes skip it and a
+    review of it is reviewing something nobody has finished. That should read at
+    a glance, before the eye reaches the word "draft"."""
     pr = change.pr
-    draft = _c(" [draft]", DIM) if pr.draft else ""
+    title, author = plain(pr.title), plain(pr.author)
+    if pr.draft:
+        stacked = f" ↳ on #{change.parent}" if change.parent else ""
+        # One DIM span over the whole row. Colouring each piece separately would
+        # end the dim at the first RESET and leave the rest bright.
+        return _c(
+            f"{change.icon} #{pr.number:<{width}} {title} [draft]  "
+            f"({author}){stacked}",
+            DIM,
+        )
     stacked = _c(f" ↳ on #{change.parent}", CYAN) if change.parent else ""
     return (
         f"{change.icon} {_c(f'#{pr.number:<{width}}', MAGENTA)} "
-        f"{pr.title}{draft}  {_c(f'({pr.author})', DIM)}{stacked}"
+        f"{title}  {_c(f'({author})', DIM)}{stacked}"
     )
 
 

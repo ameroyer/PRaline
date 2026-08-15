@@ -24,7 +24,7 @@ from .github import (
     request_review,
     resolve_review_thread,
 )
-from .term import DIM, YELLOW, _c, confirm
+from .term import DIM, YELLOW, _c, confirm, plain
 from .verdict import (
     count_items,
     flatten_review,
@@ -366,7 +366,7 @@ def has_suggestion(c: dict) -> bool:
 
 
 def _quote(text: str, width: int = 76, max_lines: int = 3) -> str:
-    wrapped = textwrap.wrap(text.strip().replace("\n", " "), width=width)
+    wrapped = textwrap.wrap(plain(text).strip().replace("\n", " "), width=width)
     if len(wrapped) > max_lines:
         wrapped = wrapped[:max_lines]
         wrapped[-1] = wrapped[-1].rstrip() + "…"
@@ -385,7 +385,7 @@ def _display_comment(idx: int, total: int, c: dict, comment_lookup: dict | None 
             loc = original.get("path") or ""
             if original.get("line"):
                 loc += f":{original['line']}"
-            print(f"  context: @{original['author']} {('on ' + loc) if loc else ''}:")
+            print(f"  context: @{plain(original['author'])} {('on ' + loc) if loc else ''}:")
             print(_quote(original["body"]))
         print()
     else:
@@ -393,7 +393,7 @@ def _display_comment(idx: int, total: int, c: dict, comment_lookup: dict | None 
         print(f"[{idx}/{total}] {label}  {location}{suggests}")
     # A suggestion block is code: wrapping it would break the exact indentation
     # GitHub commits, so bodies carrying one are printed as written.
-    body = c["body"]
+    body = plain(c["body"])
     print(body if has_suggestion(c) else textwrap.fill(body, width=80, subsequent_indent="  "))
     print()
 
@@ -454,7 +454,7 @@ def run_approval_loop(review: dict, comment_lookup: dict | None = None) -> list[
         print(f"  {i:2}. {label}  {loc or '(general)'}")
         # One line in the overview, so a body with a suggestion block in it
         # doesn't spill its newlines across the list.
-        preview = " ".join(c["body"].split())
+        preview = " ".join(plain(c["body"]).split())
         print(f"      {preview[:80]}{'…' if len(preview) > 80 else ''}")
 
     print(f"\n{'═'*60}")

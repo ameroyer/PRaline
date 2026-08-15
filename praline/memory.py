@@ -190,6 +190,28 @@ def build_graph(repo_dir: Path, model: str) -> dict:
     return graph
 
 
+def rerender_html(repo_dir: Path, repo: str) -> Path:
+    """Rewrite knowledge.html from the documents already on disk.
+
+    Free: no model call, no network, no GitHub. It exists because the page and
+    the documents age at different rates. The documents change when the repo
+    does; the page changes whenever PRaline's template does, and until something
+    re-renders, a knowledge base built last week still produces last week's page
+    with none of the sections added since."""
+    graph = config.load_graph(repo_dir)
+    config.save_knowledge_html(
+        repo_dir,
+        render.knowledge_html(
+            repo,
+            config.load_repo_knowledge(repo_dir),
+            config.load_pr_history(repo_dir),
+            graph,
+            graph_mod.stats(repo_dir, graph),
+        ),
+    )
+    return config.knowledge_html_file(repo_dir)
+
+
 def update_knowledge(
     repo_dir: Path,
     repo: str,
