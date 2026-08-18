@@ -72,9 +72,7 @@ def scan_codebase(repo_dir: Path, model: str) -> str:
         "Read this repository and write the knowledge base document.",
         model=model,
         timeout=claude_client.EXPLORE_TIMEOUT_S,
-        tools=claude_client.READ_ONLY_TOOLS,
-        deny=claude_client.SECRET_DENY_RULES,
-        cwd=repo_dir,
+        readable=repo_dir,
     )
     return _strip_preamble(raw)
 

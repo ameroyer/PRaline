@@ -25,7 +25,7 @@ They are the repo's own, applied to the repo itself.
 Two more, specific to this codebase:
 
 - **SAFETY.** Nothing writes to a user's code. Every GitHub call is a read, a comment, or a review request. Unattended modes are capped and skip drafts.
-- **SECURITY.** Tool-enabled model calls get `READ_ONLY_TOOLS` and `SECRET_DENY_RULES` together, or they do not ship.
+- **SECURITY.** A review turn reads text written by whoever opened the PR, so assume it will try to talk the model into something else and make that impossible rather than unlikely. Tools are named by `claude_client.ask(readable=...)`, one directory, scoped by permission rule; there is no way to request an unscoped tool. Settings sources and MCP servers stay off, because a `.claude/settings.json` or `.mcp.json` in the reviewed checkout is arbitrary code execution. Prove enforcement by finding the attempt in `permission_denials`, never by observing that the model declined.
 
 ## Prove it, do not assert it
 
@@ -71,6 +71,7 @@ Say plainly when something is untested or could not be verified here.
 
 Non-obvious rules that are easy to break:
 
+- Every git call lives in `github.py`. A subprocess elsewhere puts a filesystem call outside the module people audit.
 - Every review path must go through `reviewer._build_review_prompt`, or it silently loses the knowledge base and the review log.
 - A model reply that should be JSON goes through `claude_client.extract_json`. Do not write a second parser.
 - Long-running code must clear the comment cache (`github.forget_all_comments`); it is scoped to one look at a PR.

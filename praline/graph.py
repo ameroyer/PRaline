@@ -11,10 +11,10 @@ The stat tiles alongside the diagram are counted from git, not asked for. A
 number a model wrote down is a number nobody can check.
 """
 
-import subprocess
 from pathlib import Path
 
 from . import claude_client, prompts
+from .github import repo_counts
 
 KINDS = ("entry", "module", "external")
 
@@ -79,37 +79,22 @@ def build(repo_dir: Path, model: str) -> dict:
         "Map this repository's modules and how they depend on each other.",
         model=model,
         timeout=claude_client.EXPLORE_TIMEOUT_S,
-        tools=claude_client.READ_ONLY_TOOLS,
-        deny=claude_client.SECRET_DENY_RULES,
-        cwd=repo_dir,
+        readable=repo_dir,
     )
     return normalize(claude_client.extract_json(raw, "module map"))
-
-
-def _git_count(repo_dir: Path, *args: str) -> int:
-    """Lines of output from a git command, or 0 if git can't answer.
-
-    Stats are decoration: a shallow clone or a repo with no commits should
-    render a knowledge base with fewer tiles, not fail to render one."""
-    try:
-        out = subprocess.run(
-            ["git", *args], capture_output=True, text=True, cwd=repo_dir, check=True
-        ).stdout
-    except (subprocess.CalledProcessError, OSError):
-        return 0
-    return len([line for line in out.splitlines() if line.strip()])
 
 
 def stats(repo_dir: Path, graph: dict) -> list[dict]:
     """The tiles above the diagram: size of the repo, size of the map.
 
-    Every number here is counted locally, so it is checkable and cannot drift
+    Every number here is counted by git, so it is checkable and cannot drift
     from what the model felt like reporting. Zero-valued tiles are dropped."""
+    counts = repo_counts(repo_dir)
     tiles = [
         {"label": "Modules mapped", "value": len(graph.get("nodes", []))},
         {"label": "Dependencies", "value": len(graph.get("edges", []))},
-        {"label": "Tracked files", "value": _git_count(repo_dir, "ls-files")},
-        {"label": "Commits", "value": _git_count(repo_dir, "log", "--oneline")},
-        {"label": "Contributors", "value": _git_count(repo_dir, "shortlog", "-sn", "HEAD")},
+        {"label": "Tracked files", "value": counts["tracked_files"]},
+        {"label": "Commits", "value": counts["commits"]},
+        {"label": "Contributors", "value": counts["contributors"]},
     ]
     return [t for t in tiles if t["value"]]

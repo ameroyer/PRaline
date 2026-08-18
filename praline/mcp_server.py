@@ -134,7 +134,7 @@ def pr_status(pr: int, repo_dir: str | None = None) -> str:
     with _captured() as log:
         path, repo = _resolve(repo_dir)
         info = get_pr(repo, pr)
-        status = get_pr_status(repo, pr)
+        status = get_pr_status(repo, pr, info)
     return _reply(
         log,
         repo=repo,

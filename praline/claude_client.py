@@ -3,11 +3,22 @@
 Uses the user's existing Claude Code subscription — no Anthropic API key,
 no billed API calls. Every call is a single headless turn. By default tool
 access is disabled and Claude only reasons over text we hand it; callers that
-need it can opt into read-only exploration of a directory (see READ_ONLY_TOOLS).
+need it can opt into read-only exploration of ONE directory, named by `readable`.
 
-The turn is deliberately starved of credentials: PRaline's own secrets are
-stripped from the child environment (see _clean_env), so nothing the model or
-any tool it reaches can do will surface a GitHub or Slack token.
+A review turn reads untrusted text: a PR's diff, its description and its
+comments are written by whoever opened it. Everything here assumes that text
+will at some point try to talk the model into doing something else, so nothing
+is left to the model's judgement:
+
+  - No tools at all unless a caller names a directory, and then only the three
+    read tools, each scoped to that directory by a permission rule. A bare
+    `Read` would allow reading any path on the machine.
+  - No settings and no MCP servers, so a `.claude/settings.json` or `.mcp.json`
+    committed in the PR under review cannot run a hook or launch a server.
+  - No credentials in the environment (see _clean_env).
+
+None of that depends on the model declining. The permission layer refuses the
+call and records it in `permission_denials`.
 """
 
 import json
@@ -21,19 +32,21 @@ from . import budget
 DEFAULT_TIMEOUT_S = 600
 EXPLORE_TIMEOUT_S = 2400
 
-# Enough to read and search a checkout, and nothing that can write to it or
-# reach the network.
-READ_ONLY_TOOLS = "Read,Glob,Grep"
+# The tools a turn may use to read a checkout, and nothing that can write to
+# it, run a command, or reach the network. Each is scoped to one directory by
+# _read_only_rules; the bare name is never passed, because a bare `Read` allows
+# reading any path on the machine.
+_READ_TOOLS = ("Read", "Glob", "Grep")
 
-# Files a codebase scan must never open. Whatever Claude reads can end up in the
-# knowledge base, which is fed back into review prompts and can be published, so
-# secrets have to be blocked at the source. These are deny rules, which the CLI
-# enforces over the allowlist above, and they cover Grep as well as Read.
+# Files a turn must never open. Whatever Claude reads can end up in the
+# knowledge base or in a review comment, so secrets are blocked at the source.
+# Deny rules beat allow rules, which is what keeps these enforced inside the
+# very directory the turn is otherwise allowed to read.
 #
 # These match credential *files*, not any name containing "secret" or "token": a
 # blanket `*token*` would hide tokenizer.py and similar ordinary source, and a
 # scan that quietly skips real code is its own kind of failure.
-_SECRET_DENY_GLOBS = (
+_SECRET_GLOBS = (
     "**/.env*",
     "**/*.pem",
     "**/*.key",
@@ -54,7 +67,41 @@ _SECRET_DENY_GLOBS = (
     "**/credentials.*",
     "**/service-account*.json",
 )
-SECRET_DENY_RULES = ",".join(f"Read({glob})" for glob in _SECRET_DENY_GLOBS)
+
+# Every read tool, not just Read: Grep returns the matching lines of a file it
+# was never allowed to open, which is the same disclosure by another route.
+_SECRET_DENY_RULES = ",".join(
+    f"{tool}({glob})" for glob in _SECRET_GLOBS for tool in _READ_TOOLS
+)
+
+
+def _read_only_rules(directory: Path) -> str:
+    """Allow rules confining every read tool to one directory.
+
+    Scoping is the whole mechanism. `--allowedTools Read` permits reading any
+    path on the machine, and a PR diff is untrusted text sitting in the same
+    prompt, so confinement cannot rest on the model choosing well. With a
+    scoped rule the permission layer refuses the call and reports it in
+    `permission_denials`."""
+    root = directory.resolve()
+    return ",".join(f"{tool}({root}/**)" for tool in _READ_TOOLS)
+
+
+# A review turn is given no settings and no MCP servers at all.
+#
+# Both are attacker-reachable. Project settings are read from the working
+# directory, which in explore mode is a checkout of the PR being reviewed: a
+# `.claude/settings.json` in that PR defines hooks, and a hook is an arbitrary
+# shell command that runs on this machine. A `.mcp.json` in the same checkout
+# names a server *command*, which is the same thing again. Ignoring every
+# settings source closes both, and also stops the turn from inheriting the
+# user's own MCP servers, whose tools are of no use to a review and whose reach
+# is far wider than one repository.
+_ISOLATION_ARGS = (
+    "--setting-sources", "",
+    "--strict-mcp-config",
+    "--mcp-config", '{"mcpServers":{}}',
+)
 
 # The variable `github.fetch_refs` hands the token to git in. Defined here, next
 # to the strip list it has to stay inside, and imported there — naming it in two
@@ -85,9 +132,7 @@ def ask(
     user_message: str,
     model: str,
     timeout: int = DEFAULT_TIMEOUT_S,
-    tools: str = "",
-    deny: str = "",
-    cwd: Path | None = None,
+    readable: Path | None = None,
 ) -> str:
     """Run one headless Claude Code turn and return the raw text result.
 
@@ -95,18 +140,20 @@ def ask(
     large diffs blow past the OS argv size limit (E2BIG) if passed as an
     argument instead.
 
-    `tools` is a comma-separated allowlist ("" means no tools at all), `deny` a
-    matching denylist that overrides it, and `cwd` the directory the turn runs
-    in, which bounds what those tools can reach.
-    """
+    `readable` is the single directory this turn may read, and the directory it
+    runs in. Leave it None, as most callers do, and the turn gets no tools at
+    all. There is deliberately no way to ask for a tool without naming the
+    directory it is confined to."""
     budget.guard()
+    allow = _read_only_rules(readable) if readable else ""
     cmd = [
         "claude",
         "-p",
         "--output-format", "json",
         "--model", model,
-        "--allowedTools", tools,
-        "--disallowedTools", deny,
+        "--allowedTools", allow,
+        "--disallowedTools", _SECRET_DENY_RULES,
+        *_ISOLATION_ARGS,
         "--system-prompt", system_prompt,
     ]
     try:
@@ -116,7 +163,7 @@ def ask(
             capture_output=True,
             text=True,
             timeout=timeout,
-            cwd=cwd,
+            cwd=readable,
             env=_clean_env(),
         )
     except subprocess.TimeoutExpired as e:

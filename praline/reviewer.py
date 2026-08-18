@@ -159,9 +159,13 @@ def build_comment_lookup(repo: str, number: int) -> dict[int, dict]:
     return lookup
 
 
-def get_pr_status(repo: str, number: int) -> dict:
-    """Small pre-review snapshot: size of the diff and who's been commenting."""
-    pr = get_pr(repo, number)
+def get_pr_status(repo: str, number: int, pr: PRInfo | None = None) -> dict:
+    """Small pre-review snapshot: size of the diff and who's been commenting.
+
+    Pass `pr` when the caller already holds a PRInfo from `get_pr`. The list
+    endpoint omits the counts, so a PR that came from `list_open_prs` must be
+    refetched and callers holding one of those should leave `pr` alone."""
+    pr = pr or get_pr(repo, number)
     authors = get_pr_comment_authors(repo, number)
     return {
         "changed_files": pr.changed_files,
@@ -267,9 +271,7 @@ def _ask_in_checkout(
             user_msg,
             model=model,
             timeout=claude_client.EXPLORE_TIMEOUT_S,
-            tools=claude_client.READ_ONLY_TOOLS,
-            deny=claude_client.SECRET_DENY_RULES,
-            cwd=worktree,
+            readable=worktree,
         )
     finally:
         remove_pr_worktree(repo_dir, worktree)
@@ -340,9 +342,7 @@ def _review_huge_pr(
             _build_user_msg(repo, pr, diff_section),
             model=model,
             timeout=claude_client.EXPLORE_TIMEOUT_S,
-            tools=claude_client.READ_ONLY_TOOLS,
-            deny=claude_client.SECRET_DENY_RULES,
-            cwd=worktree,
+            readable=worktree,
         )
     finally:
         remove_pr_worktree(repo_dir, worktree)

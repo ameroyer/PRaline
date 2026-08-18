@@ -382,6 +382,25 @@ def get_repo_structure(repo_dir: Path, ref: str, max_files: int = 300) -> str:
     return out
 
 
+def repo_counts(repo_dir: Path) -> dict[str, int]:
+    """How big this repo is, as git measures it.
+
+    Counts, not labels: what the numbers are called belongs to whatever
+    displays them. A count git cannot produce comes back 0, because a shallow
+    clone or a repo with no commits should render one tile fewer, not fail."""
+    def lines(*args: str) -> int:
+        result = _try_git(repo_dir, *args)
+        if result.returncode != 0:
+            return 0
+        return len([ln for ln in result.stdout.splitlines() if ln.strip()])
+
+    return {
+        "tracked_files": lines("ls-files"),
+        "commits": lines("log", "--oneline"),
+        "contributors": lines("shortlog", "-sn", "HEAD"),
+    }
+
+
 def get_recent_commits(repo_dir: Path, ref: str, n: int = 50) -> str:
     return _git(repo_dir, "log", ref, f"--max-count={n}", "--oneline", "--no-merges").strip()
 

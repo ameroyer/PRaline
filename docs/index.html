@@ -260,7 +260,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <tr><td><code>config.py</code></td><td class="num">~195</td><td>Paths and load/save helpers for the <code>.praline/</code> files, plus <code>Run</code>, the dataclass holding one invocation's settings. No logic beyond file IO.</td></tr>
         <tr><td><code>render.py</code></td><td class="num">~150</td><td>Turns the knowledge base into documents: the combined markdown file, and the HTML page with the stat tiles and module map. Calls nothing but <code>markdown</code> and the template, so it can be exercised on its own.</td></tr>
         <tr><td><code>hardness.py</code></td><td class="num">~155</td><td>The four review depth levels. Mostly prose: one prompt addendum per level, plus <code>clamp</code>, <code>label</code> and <code>explores</code>. Imports nothing. See <a href="#depth">Review depth</a>.</td></tr>
-        <tr><td><code>graph.py</code></td><td class="num">~115</td><td>Asks Claude for the repo's module map and <em>validates</em> what comes back, plus the git-counted stat tiles. See <a href="#module-map">The module map</a>.</td></tr>
+        <tr><td><code>graph.py</code></td><td class="num">~105</td><td>Asks Claude for the repo's module map and <em>validates</em> what comes back, then labels the counts <code>github.repo_counts</code> returns. Runs no subprocess of its own. See <a href="#module-map">The module map</a>.</td></tr>
         <tr><td><code>mcp_server.py</code></td><td class="num">~370</td><td>The optional MCP server (<code>praline-mcp</code>), exposing the same operations as tools for Claude. See <a href="#mcp">The MCP server</a>.</td></tr>
         <tr><td><code>term.py</code></td><td class="num">~30</td><td>ANSI colors, <code>_c</code> / <code>_rule</code>, and <code>confirm()</code>, the shared yes/no prompt. Used by every module that prints.</td></tr>
         <tr><td><code>templates/<wbr>knowledge.html</code></td><td class="num">~540</td><td>Not code: the standalone HTML shell for the knowledge base, filled in by <code>render.knowledge_html</code>. Includes the dependency-free JavaScript that lays out the module map.</td></tr>
@@ -577,7 +577,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         enabled directly, since auto mode has no prompts. <code>github.add_pr_worktree</code>
         checks the PR head out detached in a temporary worktree, the diff is written to
         <code>PRALINE_DIFF.patch</code> at its root, and the review call runs with
-        <code>READ_ONLY_TOOLS</code>, <code>SECRET_DENY_RULES</code>, <code>cwd</code> set to the
+        <code>readable</code> set to the
         worktree and the scan's longer timeout. <code>prompts.HUGE_PR_EXPLORE_ADDENDUM</code>
         tells the model to page through the diff in slices and use the checkout for context. The
         worktree is force-removed in a <code>finally</code>. Declining explore mode inlines the
@@ -621,7 +621,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       <ul>
         <li><strong>First build: <code>scan_codebase</code>.</strong> A tool-enabled Claude turn
         runs with <code>cwd</code> set to the repo and reads it directly
-        (<code>claude_client.READ_ONLY_TOOLS</code>: <code>Read</code>, <code>Glob</code>,
+        (<code>Read</code>, <code>Glob</code>,
         <code>Grep</code>). It follows entry points and imports rather than guessing from a file
         list, so this is the pass that produces the module reference and the invariants. Slow, and
         it runs once. Timeout is <code>EXPLORE_TIMEOUT_S</code>, not the default.</li>
@@ -695,7 +695,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         strung across a canvas wide enough for thirteen.
       </p>
       <p>
-        The stat tiles are counted from git in <code>graph.stats</code>, never asked for. A number
+        The stat tiles come from <code>github.repo_counts</code>, never from the model. That function lives in <code>github.py</code> because every git call does; <code>graph.stats</code> only attaches labels. A number
         a model wrote down is a number nobody can check. Tiles that come back zero are dropped, so
         a shallow clone renders fewer tiles instead of a row of noughts.
       </p>
@@ -739,12 +739,33 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
       <h2 id="claude">The Claude backend</h2>
       <p><code>claude_client.ask()</code> is the only place PRaline talks to a model. It runs:</p>
 <pre><code>claude -p --output-format json --model &lt;model&gt; \
-       --allowedTools &lt;tools&gt; --disallowedTools &lt;deny&gt; \
+       --allowedTools &lt;scoped-read-rules&gt; --disallowedTools &lt;secret-globs&gt; \
+       --setting-sources "" --strict-mcp-config --mcp-config '{"mcpServers":{}}' \
        --system-prompt &lt;prompt&gt;</code></pre>
       <p>Details worth knowing before you modify it:</p>
       <ul>
         <li>The user message (typically a large diff) is piped via <strong>stdin</strong>, not argv. Large diffs exceed the OS argument size limit (<code>E2BIG</code>) otherwise.</li>
-        <li>There are exactly two call shapes. Reviews and update passes use the defaults, <code>tools=""</code> and no <code>cwd</code>: no tools at all, so Claude only reasons over the text it is handed. The codebase scan and huge-PR explore mode pass <code>READ_ONLY_TOOLS</code>, <code>SECRET_DENY_RULES</code> and a <code>cwd</code>. Nothing else should need tools; if you think it does, see <a href="#security">Secrets and data flow</a> first.</li>
+        <li><strong>There are exactly two call shapes, and the confinement is structural.</strong>
+        <code>ask()</code> takes <code>readable</code>, one directory, and there is no
+        <code>tools=</code> parameter any more. Omit it, as reviews and update passes do, and the turn
+        gets no tools. Pass it, as the codebase scan, the module map and explore mode do, and it gets
+        <code>Read</code>, <code>Glob</code> and <code>Grep</code> scoped to that directory by
+        <code>_read_only_rules</code>, plus the secret denylist and
+        <code>_ISOLATION_ARGS</code>, which <code>ask()</code> applies itself so no call site can omit
+        them. A bare <code>Read</code> allows reading any path on the machine, which is why the old
+        signature was removed rather than documented. Scoping <em>every</em> read tool matters:
+        <code>Grep</code> takes its own <code>path</code> and returns the matching lines of a file it
+        was never allowed to open. Nothing else should need tools; if you think it does, see
+        <a href="#security">Secrets and data flow</a> first.</li>
+        <li><strong>No settings, no MCP servers.</strong> Explore mode runs with the working directory
+        set to a checkout of the PR under review, so a <code>.claude/settings.json</code> there would
+        install hooks and a <code>.mcp.json</code> would launch a server command: arbitrary code
+        execution triggered by opening a pull request. <code>_ISOLATION_ARGS</code> closes both, and
+        keeps a review away from the user's own MCP servers. Never restore a settings source to widen
+        a permission; scope the rule instead.</li>
+        <li><strong>Enforcement is the permission layer, not the model.</strong> Verify by asking a
+        turn to read outside its directory and finding the attempt in the reply's
+        <code>permission_denials</code>. A model declining is not evidence of anything.</li>
         <li>Every failure mode (timeout, non-zero exit, empty stdout, bad JSON, error payload, empty result) raises a <code>RuntimeError</code> carrying truncated stderr/stdout. Keep that style: errors here surface directly in the CLI and are the user's only debugging signal.</li>
         <li>The default timeout is 600 seconds; big diffs on big models are slow. The scan gets 2,400.</li>
         <li>The subprocess runs with <code>env=_clean_env()</code>: the current environment minus
@@ -763,7 +784,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         levels, and both matter:
       </p>
       <ul>
-        <li><strong>The CLI blocks credential files.</strong> <code>SECRET_DENY_RULES</code> in
+        <li><strong>The CLI blocks credential files.</strong> The secret denylist in
         <code>claude_client.py</code> is a list of <code>Read(&lt;glob&gt;)</code> deny rules
         (<code>.env*</code>, <code>*.pem</code>, <code>*.key</code>, <code>id_rsa*</code>,
         <code>.netrc</code>, <code>secrets.*</code>, <code>credentials.*</code> and more). They match
@@ -815,7 +836,7 @@ uv run praline --dir ~/src/some-test-repo --model sonnet</code></pre>
         <li><strong>No write-to-code endpoints.</strong> Every function in <code>github.py</code> maps to a read endpoint, a comment endpoint, or the review-request endpoint. When adding a GitHub call, keep it inside the ALLOWED list documented at the top of that file, and note what is <em>not</em> there: approving, merging, and opening or editing issues.</li>
         <li><strong>No auto-posting outside <code>praline auto</code>.</strong> The interactive menu's comments flow through <code>run_approval_loop</code> and the final confirmation; nothing in <code>cli._do_review</code> may skip them. <code>auto.run_auto</code> is the one deliberate exception, gated behind its own subcommand.</li>
         <li><strong>No API key.</strong> The model backend stays the <code>claude</code> CLI. Do not introduce <code>anthropic</code> SDK calls or key handling.</li>
-        <li><strong>No tools beyond read-only, and never without the denylist.</strong> The codebase scan and huge-PR explore mode are the only tool-enabled calls. If you add another, pass <code>READ_ONLY_TOOLS</code> and <code>SECRET_DENY_RULES</code> together; a write or shell tool would break the "never touches code" promise outright.</li>
+        <li><strong>No tools beyond read-only, and never unscoped.</strong> A tool-enabled call names its directory through <code>readable</code> and gets nothing else. A write or shell tool would break the "never touches code" promise outright, and an unscoped read tool hands a prompt-injected PR the whole filesystem.</li>
         <li><strong>Credentials never reach a subprocess or a log line.</strong> Tokens are read from the environment at the point of use, sent only to their own API host, and stripped from the <code>claude</code> child environment. Nothing writes one to disk, and no error message may interpolate one.</li>
         <li><strong>Slack only ever sends, and only to people.</strong> The four methods called are <code>auth.test</code>, a user lookup, <code>conversations.open</code> and <code>chat.postMessage</code> to a DM or group DM. No channels, no history reads, and a Slack failure never rolls back or blocks a review.</li>
         <li><strong>Nothing posts from the MCP server without a second call.</strong> <code>review_pr_draft</code> drafts and returns; <code>post_review</code> publishes what the user picked. Any new tool that writes to GitHub stays separate from the tool that produces the content, for the same reason the interactive loop exists.</li>
